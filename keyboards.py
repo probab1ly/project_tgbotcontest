@@ -1,19 +1,46 @@
 from aiogram.types import ReplyKeyboardMarkup, InlineKeyboardMarkup, KeyboardButton, InlineKeyboardButton
-def get_main_keyboard():
+def get_main_keyboard(is_admin: bool = False):
+    keyboard = [
+        [
+            KeyboardButton(text="📝 Создать анкету"),
+            KeyboardButton(text="👤 Моя анкета")
+        ],
+        [
+            KeyboardButton(text="👥 Оценить анкету"),
+            KeyboardButton(text="📊 Моя статистика")
+        ]
+    ]
+
+    if is_admin:
+        keyboard.append([
+            KeyboardButton(text="👨‍💼 Модерация анкет"),
+        ])
+    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+
+def get_moderation_keyboard():
     keyboard = ReplyKeyboardMarkup(
         keyboard = [
             [
-                KeyboardButton(text="📝 Создать анкету"),
-                KeyboardButton(text="👤 Моя анкета")
-            ],
-            [
-                KeyboardButton(text="👥 Оценить анкету"),
-                KeyboardButton(text="📊 Моя статистика")
+                KeyboardButton(text="📋 Анкеты на модерации"),
+                KeyboardButton(text="🔙 Назад")
             ]
         ], resize_keyboard=True
     )
     return keyboard
 
+def get_moderation_profile(profile_id: int):
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard = [
+            [
+                InlineKeyboardButton(text="✅ Одобрить", callback_data=f"verify_{profile_id}"),
+                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_{profile_id}")
+            ],
+            [
+                InlineKeyboardButton(text="⏭ Следующая анкета", callback_data="next_profile")
+            ]
+        ]
+    )
+    return keyboard
 def get_rating_keyboard():
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -49,4 +76,4 @@ def get_profile_verification_keyboard(profile_id: int):
             ]
         ]
     )
-    return keyboard #get_moderation_keyboard
+    return keyboard
