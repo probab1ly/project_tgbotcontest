@@ -1,7 +1,7 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, selectinload
 from sqlalchemy.future import select
-from sqlalchemy import func, and_, desc
+from sqlalchemy import func, and_, desc, delete
 from models import Base, User, Profile, Rating
 from datetime import datetime
 import logging
@@ -94,3 +94,102 @@ async def get_profile_info(profile_id: int):
             return profile.delete_at, days
         else:
             return None, 0
+async def edit_profile(profile_id: int, description: str, video_id: str):
+    async with async_session() as session:
+        result = await session.execute(
+            select(Profile).where(Profile.id == profile_id)
+        )
+        profile = result.scalar_one_or_none()
+        if profile:
+            if description is not None:
+                profile.description = description
+            if video_id is not None:
+                profile.video_id = video_id
+            profile.is_verified = False
+            await session.commit()
+            return profile
+        return None
+async def delete_profile(profile_id: int):
+    async with async_session() as session:
+        result = await session.execute(
+            select(Profile).where(Profile.id == profile_id)
+        )
+        profile = result.scalar_one_or_none()
+        if profile:
+            await session.execute(
+                delete(Rating).where(Rating.profile_id == profile_id)
+            )
+            await session.delete(profile)
+            await session.commit()
+            return True
+        return False
+async def get_user_profile_with_rating(telegram_id: int):
+    async with async_session() as session:
+        user_result = await session.execute(
+            select(User).options(selectinload(User.profile).selectinload(Profile.received_ratings)).where(User.telegram_id == telegram_id)
+        )
+        user = user_result.scalar_one_or_none()
+        if not user:
+            logger.info(f"Пользователь не найден: telegram_id={telegram_id}")
+            return None
+        return user.profile
+
+async def verify_profile(profile_id: int):
+    async with async_session() as session:
+        result = await session.execute(
+            select(Profile).options(selectinload(Profile.user)).where(Profile.id == profile_id)
+        )
+        profile = result.scalar_one_or_none()
+        if profile:
+            profile.is_varified = True
+            await session.commit()
+            return profile
+        return None
+async def reject_profile(profile_id: int):
+    async with async_session() as session:
+        result = await session.execute(
+            select(Profile).options(selectinload(Profile.user)).where(Profile.id == profile_id)
+        )
+        profile = result.scalar_one_or_none()
+        if profile:
+            session.delete(profile)
+            await session.commit()
+            return True
+        return False
+
+async def get_need_profiles():
+    async with async_session() as session:
+        result = await session.execute(
+            select(Profile).options(selectinload(Profile.user)).where(Profile.is_verified == False)
+        )
+        return result.scalars().all()
+
+async def get_profile_for_moderation(profile_id: int):
+    async with async_session() as session:
+        result = await session.execute(
+            select(Profile).options(selectinload(Profile.user)).where(Profile.id == profile_id)
+        )
+        return result.scalar_one_or_none()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
