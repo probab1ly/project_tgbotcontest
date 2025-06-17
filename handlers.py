@@ -468,7 +468,7 @@ async def back_from_rating(callback: CallbackQuery):
         is_admin=True
     else:
         is_admin=False
-    await callback.message.answer('Вы переместились а главное меню', reply_markup=get_main_keyboard(is_admin=is_admin))
+    await callback.message.answer('Вы переместились а главное меню.', reply_markup=get_main_keyboard(is_admin=is_admin))
 
 
 
