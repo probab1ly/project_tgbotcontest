@@ -52,16 +52,20 @@ async def create_user(telegram_id: int, username: str):
 
 async def create_profile(user_id: int, description: str, video_id: str):
     async with async_session() as session:
-        existing_profile_result = await session.execute(
-            select(Profile).where(Profile.id == user_id)
+        user_result = await session.execute(
+            select(User).where(User.id == user_id)
         )
-        existing_profile = existing_profile_result.scalar_one_or_none()
+        user = user_result.scalar_one_or_none()
+        existing_profile_result = await session.execute(
+            select(Profile).where(Profile.user_id == user.id)
+        )
         if existing_profile:
             logger.info(f"Пользователь уже существует: telegram_id={telegram_id}")
-            return existing_profile
-        profile = Profile(user_id=user_id, description=description, video_id=video_id)
+            return None
+        profile = Profile(user_id=user_id, description=description, video_id=video_id, is_verified=False)
         session.add(profile)
         await session.commit()
+        await session.refresh(profile)
         return profile
 
 async def get_random_profile(ex_user_id: int):
@@ -71,22 +75,26 @@ async def get_random_profile(ex_user_id: int):
         )
         user = user_result.scalar_one_or_none()
         if not user: #если пользователь не найден, возвращаем случайную анкету
-            query = select(Profile).options(selectinload(Profile.user), selectinload(Profile.received_ratings)).where(Profile.is_verified == True)
-            result = await session.execute(query.order_by(func.random()).limit(1))
-            return result.scalar_one_or_none()
-        rated_profiles_result = await session.execute(
-            select(Rating.profile_id).where(Rating.rater_id == user.id)
+            return None
+        viewed_profiles_result = await session.execute(
+            select(ProfileView.profile_id).where(ProfileView.viewer_id == user.id)
         )
-        rated_profile_ids = [row[0] for row in rated_profiles_result.fetchall()]
+        viewed_profile_ids = [row[0] for row in viewed_profiles_result.fetchall()]
         query = select(Profile).options(selectinload(Profile.user), selectinload(Profile.received_ratings)).where(
             and_(
                 Profile.is_verified == True,
                 Profile.user_id != user.id,
-                ~Profile.id.in_(rated_profile_ids) if rated_profile_ids else True
+                ~Profile.id.in_(viewed_profile_ids) if viewed_profile_ids else True
             )
         ).order_by(func.random()).limit(1)
         result = await session.execute(query)
-        return result.scalar_one_or_none()
+        profile = result.scalar_one_or_none()
+        if profile:
+            logger.info(
+                f"Возвращена анкета для пользователя {ex_user_id}: profile_id={profile.id}, user_id={profile.user_id}")
+        else:
+            logger.info(f"Нет доступных анкет для пользователя {ex_user_id}")
+        return profile
 
 async def mark_profile_as_viewed(viewer_telegram_id: int, profile_id: int):
     async with async_session() as session:
