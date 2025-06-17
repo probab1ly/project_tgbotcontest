@@ -10,7 +10,7 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     profile = relationship('Profile', back_populates='user', uselist=False)
     given_ratings = relationship('Rating', back_populates='rater')
-
+    profile_views = relationship('ProfileView', back_populates='viewer')
 class Profile(Base):
     __tablename__ = 'profiles'
     id = Column(Integer, primary_key=True)
@@ -23,7 +23,7 @@ class Profile(Base):
     delete_at = Column(DateTime, default=datetime.utcnow()+timedelta(days=30))
     user = relationship('User', back_populates='profile')
     received_ratings = relationship('Rating', back_populates='profile')
-
+    viewed_by = relationship('ProfileView', back_populates='profile')
 class Rating(Base):
     __tablename__ = 'ratings'
     id = Column(Integer, primary_key=True)
@@ -35,6 +35,11 @@ class Rating(Base):
     rater = relationship('User', back_populates='given_ratings')
     profile = relationship('Profile', back_populates='received_ratings')
 
-
-
-
+class ProfileView(Base):
+    __tablename__ = 'profile_views'
+    id = Column(Integer, primary_key=True)
+    viewer_id = Column(Integer, ForeignKey('users.id'))
+    profile_id = Column(Integer, ForeignKey('profiles.id'))
+    viewed_at = Column(DateTime, default=datetime.utcnow)
+    viewer = relationship('User', back_populates='profile_views')
+    profile = relationship('Profile', back_populates='viewed_by')
