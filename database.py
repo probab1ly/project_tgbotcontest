@@ -2,7 +2,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, selectinload
 from sqlalchemy.future import select
 from sqlalchemy import func, and_, desc, delete
-from models import Base, User, Profile, Rating
+from models import Base, User, Profile, Rating, ProfileView
 from datetime import datetime
 import logging
 logger = logging.getLogger(__name__)
@@ -37,7 +37,10 @@ async def get_user_profile(telegram_id: int):
             return None
 async def create_user(telegram_id: int, username: str):
     async with async_session() as session:
-        existing_user = await get_user(telegram_id)
+        existing_user_result = await session.execute(
+            select(User).where(User.telegram_id == telegram_id)
+        )
+        existing_user = existing_user_result.scalar_one_or_none()
         if existing_user:
             logger.info(f"Пользователь уже существует: telegram_id={telegram_id}")
             return existing_user
@@ -49,6 +52,13 @@ async def create_user(telegram_id: int, username: str):
 
 async def create_profile(user_id: int, description: str, video_id: str):
     async with async_session() as session:
+        existing_profile_result = await session.execute(
+            select(Profile).where(Profile.id == user_id)
+        )
+        existing_profile = existing_profile_result.scalar_one_or_none()
+        if existing_profile:
+            logger.info(f"Пользователь уже существует: telegram_id={telegram_id}")
+            return existing_profile
         profile = Profile(user_id=user_id, description=description, video_id=video_id)
         session.add(profile)
         await session.commit()
@@ -56,12 +66,54 @@ async def create_profile(user_id: int, description: str, video_id: str):
 
 async def get_random_profile(ex_user_id: int):
     async with async_session() as session:
-        query = select(Profile).where(Profile.is_verified == True)
-        if ex_user_id:
-            query = query.where(Profile.user_id != ex_user_id)
-        result = await session.execute(query.order_by(func.random()).limit(1))
+        user_result = await session.execute(
+            select(User).where(User.telegram_id == ex_user_id)
+        )
+        user = user_result.scalar_one_or_none()
+        if not user: #если нет user, значит нет анкеты
+            query = select(Profile).options(selectinload(Profile.user), selectinload(Profile.received_ratings)).where(Profile.is_verified == True)
+            result = await session.execute(query.order_by(func.random()).limit(1))
+            return result.scalar_one_or_none()
+        viewed_profiles_result = await session.execute(
+            select(ProfileView.profile_id).where(ProfileView.viewer_id == user.id)
+        )
+        viewed_profile_ids = [row[0] for row in viewed_profiles_result.fetchall()]
+        query = select(Profile).options(selectinload(Profile.user), selectinload(Profile.received_ratings)).where(
+            and_(
+                Profile.is_verified == True,
+                Profile.user_id != user.id,
+                ~Profile.id.in_(viewed_profile_ids) if viewed_profile_ids else True
+            )
+        ).order_by(func.random()).limit(1)
+        result = await session.execute(query)
         return result.scalar_one_or_none()
 
+async def mark_profile_as_viewed(viewer_telegram_id: int, profile_id: int):
+    async with async_session() as session:
+        user_result = await session.execute(
+            select(User).where(User.telegram_id == viewer_telegram_id)
+        )
+        user = user_result.scalar_one_or_none()
+        if not user:
+            logger.error(f"Пользователь не найден: telegram_id={viewer_telegram_id}")
+            return False
+        # Проверяем, не просматривал ли пользователь эту анкету уже
+        existing_view_result = await session.execute(
+            select(ProfileView).where(
+                and_(
+                    ProfileView.viewer_id == viewer_telegram_id,
+                    ProfileView.profile_id == profile_id
+                )
+            )
+        )
+        existing_view = existing_view_result.scalar_one_or_none()
+        if existing_view:
+            existing_view.viewed_at = datetime.utcnow()
+        else:
+            profile_view = ProfileView(viewer_id=user.id, profile_id=profile_id)
+            session.add(profile_view)
+        await session.commit()
+        return True
 async def create_rating(rater_id: int, profile_id: int, score: float, comment: str):
     async with async_session() as session:
         rating = Rating(rater_id=rater_id, profile_id=profile_id, score=score, comment=comment)
@@ -141,21 +193,28 @@ async def verify_profile(profile_id: int):
         )
         profile = result.scalar_one_or_none()
         if profile:
-            profile.is_varified = True
+            user_telegram_id = profile.user.telegram_id
+            user_username = profile.user.username
+            profile.is_verified = True
             await session.commit()
-            return profile
+            return {'id': profile.id, 'telegram_id': user_telegram_id, 'username': user_username}
         return None
 async def reject_profile(profile_id: int):
     async with async_session() as session:
         result = await session.execute(
-            select(Profile).options(selectinload(Profile.user)).where(Profile.id == profile_id)
+            delete(Profile).options(selectinload(Profile.user)).where(Profile.id == profile_id)
         )
         profile = result.scalar_one_or_none()
         if profile:
-            session.delete(profile)
+            user_telegram_id = profile.user.telegram_id
+            user_username = profile.user.username
+            await session.execute(
+                delete(Rating).where(Rating.profile_id == profile_id)
+            )
+            await session.delete(profile)
             await session.commit()
-            return True
-        return False
+            return {'id': profile.id, 'telegram_id': user_telegram_id, 'username': user_username}
+        return None
 
 async def get_need_profiles():
     async with async_session() as session:
@@ -171,6 +230,36 @@ async def get_profile_for_moderation(profile_id: int):
         )
         return result.scalar_one_or_none()
 
+
+async def get_unviewed_profiles_count(viewer_telegram_id: int):
+    """Возвращает количество непросмотренных анкет для пользователя"""
+    async with async_session() as session:
+        # Получаем ID пользователя
+        user_result = await session.execute(
+            select(User).where(User.telegram_id == viewer_telegram_id)
+        )
+        user = user_result.scalar_one_or_none()
+
+        if not user:
+            return 0
+
+        # Получаем ID просмотренных анкет
+        viewed_profiles_result = await session.execute(
+            select(ProfileView.profile_id).where(ProfileView.viewer_id == user.id)
+        )
+        viewed_profile_ids = [row[0] for row in viewed_profiles_result.fetchall()]
+
+        # Подсчитываем непросмотренные анкеты
+        query = select(func.count(Profile.id)).where(
+            and_(
+                Profile.is_verified == True,
+                Profile.user_id != user.id,
+                ~Profile.id.in_(viewed_profile_ids) if viewed_profile_ids else True
+            )
+        )
+
+        result = await session.execute(query)
+        return result.scalar()
 
 
 
