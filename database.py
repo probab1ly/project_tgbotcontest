@@ -70,19 +70,19 @@ async def get_random_profile(ex_user_id: int):
             select(User).where(User.telegram_id == ex_user_id)
         )
         user = user_result.scalar_one_or_none()
-        if not user: #если нет user, значит нет анкеты
+        if not user: #если пользователь не найден, возвращаем случайную анкету
             query = select(Profile).options(selectinload(Profile.user), selectinload(Profile.received_ratings)).where(Profile.is_verified == True)
             result = await session.execute(query.order_by(func.random()).limit(1))
             return result.scalar_one_or_none()
-        viewed_profiles_result = await session.execute(
-            select(ProfileView.profile_id).where(ProfileView.viewer_id == user.id)
+        rated_profiles_result = await session.execute(
+            select(Rating.profile_id).where(Rating.rater_id == user.id)
         )
-        viewed_profile_ids = [row[0] for row in viewed_profiles_result.fetchall()]
+        rated_profile_ids = [row[0] for row in rated_profiles_result.fetchall()]
         query = select(Profile).options(selectinload(Profile.user), selectinload(Profile.received_ratings)).where(
             and_(
                 Profile.is_verified == True,
                 Profile.user_id != user.id,
-                ~Profile.id.in_(viewed_profile_ids) if viewed_profile_ids else True
+                ~Profile.id.in_(rated_profile_ids) if rated_profile_ids else True
             )
         ).order_by(func.random()).limit(1)
         result = await session.execute(query)
@@ -109,9 +109,12 @@ async def mark_profile_as_viewed(viewer_telegram_id: int, profile_id: int):
         existing_view = existing_view_result.scalar_one_or_none()
         if existing_view:
             existing_view.viewed_at = datetime.utcnow()
+            logger.info(f"Обновлен просмотр: пользователь {viewer_telegram_id}, анкета {profile_id}")
+
         else:
             profile_view = ProfileView(viewer_id=user.id, profile_id=profile_id)
             session.add(profile_view)
+            logger.info(f"Создан новый просмотр: пользователь {viewer_telegram_id}, анкета {profile_id}")
         await session.commit()
         return True
 async def create_rating(rater_id: int, profile_id: int, score: float, comment: str):
@@ -229,7 +232,6 @@ async def get_profile_for_moderation(profile_id: int):
             select(Profile).options(selectinload(Profile.user)).where(Profile.id == profile_id)
         )
         return result.scalar_one_or_none()
-
 
 async def get_unviewed_profiles_count(viewer_telegram_id: int):
     """Возвращает количество непросмотренных анкет для пользователя"""
