@@ -15,8 +15,10 @@ from database import (
     create_rating, delete_ex_profiles, get_profile_info, get_user_profile,
     edit_profile, delete_profile, get_user_profile_with_rating,
     verify_profile, reject_profile, get_need_profiles, get_profile_for_moderation,
-    verify_profile, reject_profile
+    verify_profile, reject_profile, mark_profile_as_viewed,
+    get_unviewed_profiles_count
 )
+
 logger = logging.getLogger(__name__)
 router = Router()
 class ProfileStates(StatesGroup):
@@ -32,6 +34,8 @@ class RatingStates(StatesGroup):
 class ModerationStates(StatesGroup):
     view_profiles = State()
 
+class ProfileViewStates(StatesGroup):
+    view_profiles = State()
 async def show_profile_for_moderation(message: Message, profile):
     profile_text = (
         f"📝 Анкета на модерацию:\n\n"
@@ -42,26 +46,107 @@ async def show_profile_for_moderation(message: Message, profile):
     await message.answer_video(
         video=profile.video_id,
         caption=profile_text,
-        reply_markup=get_profile_moderation_keyboard(profile.id)
+        reply_markup=get_moderation_profile(profile.id)
     )
 
+async def next_profile(callback: CallbackQuery, state: FSMContext):#moderation
+    if callback.from_user.id != 1653541807:
+        await callback.answer("У вас нет прав для этого действия")
+        return
+    data = await state.get_data()
+    if not data:
+        await callback.answer("Ошибка: данные не найдены")
+        return
+
+    profiles = data['profiles']
+    current_index = data['current_index']
+    if current_index >= len(profiles)-1:
+        await callback.answer("Это последняя анкета")
+        await state.clear()
+        await callback.message.answer(
+            "👨‍💼 Панель модерации\n\n"
+            "Все анкеты обработаны. Выберите действие:",
+            reply_markup=get_moderation_keyboard()
+        )
+        return
+    current_index += 1
+    await state.update_data(current_index=current_index)
+    profile = await get_profile_for_moderation(profiles[current_index])
+    if profile:
+        await callback.message.delete()
+        await show_profile_for_moderation(callback.message, profile)
+    else:
+        await callback.answer("Ошибка при загрузке анкеты")
+
+async def show_next_profile(message: Message, state: FSMContext):#clients
+    profile = await get_random_profile(message.from_user.id)
+    if not profile:
+        await message.answer(
+            "😔 К сожалению, больше нет доступных анкет для оценки.\n"
+            "Попробуйте позже!",
+            reply_markup=get_main_keyboard()
+        )
+        await state.clear()
+        return
+    if not profile.user:
+        await message.answer(
+            "Ошибка: не удалось загрузить данные пользователя.",
+            reply_markup=get_main_keyboard()
+        )
+        await state.clear()
+        return
+
+    await mark_profile_as_viewed(message.from_user.id, profile.id)
+    await state.update_data(current_profile_id=profile.id)
+    profile_text = (
+        f"👤 Анкета пользователя @{profile.user.username}\n\n"
+        f"📝 Описание: {profile.description}\n"
+        f"⭐️ Средняя оценка: {sum(r.score for r in profile.received_ratings) / len(profile.received_ratings) if profile.received_ratings else 0:.1f}\n"
+        f"📊 Количество оценок: {len(profile.received_ratings)}"
+    )
+    if profile.video_id:
+        await message.answer_video(
+            video=profile.video_id,
+            caption=profile_text,
+            reply_markup=get_rating_keyboard()
+        )
+    else:
+        await message.answer(
+            profile_text,
+            reply_markup=get_rating_keyboard()
+        )
 @router.message(Command('start'))
 async def start(message: Message):
-    user = await get_user(message.from_user.id)
-    if not user:
-        user = await create_user(message.from_user.id, message.from_user.username)
     if message.from_user.id == 1653541807:
         is_admin=True
     else:
         is_admin=False
+    user = await get_user(message.from_user.id)
+    if not user:#новый пользователь без анкеты
+        user = await create_user(message.from_user.id, message.from_user.username)
     await message.answer("Добро пожаловать в бот анкет! 🎉\n"
         "Вы можете создать свою анкету или оценивать анкеты других пользователей.",
                          reply_markup=get_main_keyboard(is_admin=is_admin))
 
 @router.message(F.text == '📝 Создать анкету')
 async def create_profile_start(message: Message, state: FSMContext):
-    await state.set_state(ProfileStates.waiting_for_description)
-    await message.answer("Пожалуйста, напишите описание для вашей анкеты:")
+    if message.from_user.id == 1653541807:
+        is_admin=True
+    else:
+        is_admin=False
+    existing_profile = await get_user_profile(message.from_user.id)
+    if existing_profile:
+        await message.answer(
+            "⚠️ У вас уже есть активная анкета!\n\n"
+            "Вы можете:\n"
+            "• Посмотреть свою анкету (кнопка '👤 Моя анкета')\n"
+            "• Отредактировать анкету\n"
+            "• Удалить текущую анкету и создать новую",
+            reply_markup=get_main_keyboard(is_admin=is_admin)
+        )
+    else:
+        await state.set_state(ProfileStates.waiting_for_description)
+        await message.answer("Пожалуйста, напишите описание для вашей анкеты:")
 
 @router.message(ProfileStates.waiting_for_description)
 async def process_description(message: Message, state: FSMContext):
@@ -74,6 +159,10 @@ async def process_description(message: Message, state: FSMContext):
 
 @router.message(ProfileStates.waiting_for_video, F.video)
 async def process_video(message: Message, state: FSMContext, bot: Bot):
+    if message.from_user.id == 1653541807:
+        is_admin=True
+    else:
+        is_admin=False
     data = await state.get_data()
     if not data or 'description' not in data:
         logger.error('Отсутствуют данные описания в состоянии')
@@ -120,12 +209,13 @@ async def process_video(message: Message, state: FSMContext, bot: Bot):
 
     delete_at, days = await get_profile_info(profile.id)
     await state.clear()
+
     await message.answer(
         "Ваша анкета успешно создана и отправлена на модерацию! "
         f"После проверки она появится в ленте для оценки.\n\n"
         f"⚠️ Анкета будет автоматически удалена через {days} дней"
         f"({delete_at.strftime('%d.%m.%Y %H:%M')})",
-        reply_markup=get_main_keyboard()
+        reply_markup=get_main_keyboard(is_admin=is_admin)
     )
 
     admin_message = (
@@ -134,17 +224,23 @@ async def process_video(message: Message, state: FSMContext, bot: Bot):
         f"📝 Описание: {data['description']}\n"
         f"📅 Создана: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
     )
-    await bot.send_video(chat_id='1653541807',video=video_id, caption=admin_message, reply_markup=get_profile_verification_keyboard(profile.id))
-
+    await bot.send_video(chat_id='1653541807',
+                         video=video_id,
+                         caption=admin_message, reply_markup=get_profile_verification_keyboard(profile.id)
+    )
 @router.message(F.text=="👤 Моя анкета")
 async def show_profile(message: Message):
+    if message.from_user.id == 1653541807:
+        is_admin=True
+    else:
+        is_admin=False
     user = await get_user(message.from_user.id)
     profile = await get_user_profile(message.from_user.id)
     if not profile or not user:
         await message.answer(
             "У вас пока нет анкеты.\n"
             "Создайте её, нажав кнопку '📝 Создать анкету'",
-            reply_markup=get_main_keyboard()
+            reply_markup=get_main_keyboard(is_admin=is_admin)
         )
     delete_at, days = await get_profile_info(profile.id)
     ratings = profile.received_ratings
@@ -153,7 +249,6 @@ async def show_profile(message: Message):
     profile_text = (
         f"👤 Ваша анкета:\n\n"
         f"📝 Описание: {profile.description}\n"
-        f"📊 Статус: {status_text}\n"
         f"⭐️ Средняя оценка: {round(avg_rating, 1)}\n"
         f"📈 Количество оценок: {len(ratings)}\n"
         f"⏳ Дней до удаления: {days}\n"
@@ -192,6 +287,10 @@ async def process_edit_description(message: Message, state: FSMContext):
 
 @router.message(ProfileStates.waiting_for_edit_video)
 async def process_edit_video(message: Message, state: FSMContext, bot: Bot):
+    if message.from_user.id == 1653541807:
+        is_admin=True
+    else:
+        is_admin=False
     data = await state.get_data()
     if not data or 'profile_id' not in data or 'description' not in data:
         await message.answer("Произошла ошибка. Пожалуйста, попробуйте снова.")
@@ -216,11 +315,11 @@ async def process_edit_video(message: Message, state: FSMContext, bot: Bot):
             f"📝 Описание: {new_description}\n"
         )
         await bot.send_video(chat_id='1653541807', video=profile.video_id, caption=admin_message, reply_markup=get_profile_edit())
-        await message.answer('Анкета отправлена на модерацию', reply_markup=get_main_keyboard())
+        await message.answer('Анкета отправлена на модерацию', reply_markup=get_main_keyboard(is_admin=is_admin))
     else:
         await message.answer(
             "Произошла ошибка при обновлении анкеты. Пожалуйста, попробуйте позже.",
-            reply_markup=get_main_keyboard()
+            reply_markup=get_main_keyboard(is_admin=is_admin)
         )
     await state.clear()
 
@@ -260,34 +359,125 @@ async def show_pending_profiles(message: Message, state: FSMContext):
 
 @router.message(F.text == '🔙 Назад')
 async def back_button(message: Message):
+    if message.from_user.id == 1653541807:
+        is_admin=True
+    else:
+        is_admin=False
     if message.from_user.id != 1653541807:
         await message.answer("У вас нет прав для доступа к этому разделу.")
         return
-    await message.answer('Вы переместились в главное меню', reply_markup=get_main_keyboard(is_admin=True))
+    await message.answer('Вы переместились в главное меню', reply_markup=get_main_keyboard(is_admin=is_admin))
 
-@router.message(F.data == 'next_profile')
-async def next_profile(callback: CallbackQuery, state: FSMContext):
+@router.callback_query(F.data.startswith('verify_'))
+async def verify_profile_handler(callback: CallbackQuery, bot: Bot, state: FSMContext):
     if callback.from_user.id != 1653541807:
-        await callback.answer("У вас нет прав для этого действия")
+        await callback.answer("У вас нет прав для выполнения этого действия", show_alert=True)
+        is_admin=False
         return
-    data = state.get_data()
-    if not data:
-        await callback.answer("Ошибка: данные не найдены")
-        return
+    is_admin=True
+    profile_id = int(callback.data.split('_')[1])
+    result = await verify_profile(profile_id)
+    if result:
+        await bot.send_message(chat_id=result['telegram_id'], text="✅ Ваша анкета была одобрена модератором!\n"
+                     "Теперь она доступна для оценки другими пользователями.")
+        await callback.message.answer('Анкета одобрена', reply_markup=get_main_keyboard(is_admin=is_admin))
+        await next_profile(callback, state)
 
-    profiles = data['profiles']
-    current_index = data['current_index']
-    if current_index >= len(profiles)-1:
-        await callback.answer("Это последняя анкета")
+@router.callback_query(F.data.startswith('reject_'))
+async def reject_profile_handler(callback: CallbackQuery, bot: Bot, state: FSMContext):
+    if callback.from_user.id != 1653541807:
+        await callback.answer("У вас нет прав для выполнения этого действия", show_alert=True)
+        is_admin=False
         return
-    current_index += 1
-    await state.update_data(current_idnex=current_index)
-    profile = await get_profile_for_moderation(profiles[current_index])
-    if profile:
-        await callback.message.delete()
-        await show_profile_for_moderation(callback.message, profile)
+    is_admin=True
+    profile_id = int(callback.data.split('_')[1])
+    result = await reject_profile(profile_id)
+    if result:
+        await bot.send_message(chat_id=result['telegram_id'], text="❌ Ваша анкета была отклонена модератором.\n"
+                     "Пожалуйста, создайте новую анкету с учетом правил:\n"
+                     "1. Описание должно быть информативным\n"
+                     "2. Видео должно быть качественным\n"
+                     "3. Содержимое должно соответствовать правилам сообщества")
+        await callback.message.answer('Анкета отклонена', reply_markup=get_main_keyboard(is_admin=is_admin))
+        await next_profile(callback, state)
+
+@router.message(F.text == "👥 Оценить анкеты")
+async def start_rating_profiles(message: Message, state: FSMContext):
+    if message.from_user.id == 1653541807:
+        is_admin=True
     else:
-        await callback.answer("Ошибка при загрузке анкеты")
+        is_admin=False
+    available_count = await get_unviewed_profiles_count(message.from_user.id)
+    profile = await get_random_profile(message.from_user.id)
+    if not profile or available_count == 0:
+        await message.answer(
+            "😔 К сожалению, сейчас нет доступных анкет для оценки.\n"
+            "Попробуйте позже!",
+            reply_markup=get_main_keyboard(is_admin=is_admin)
+        )
+        return
+    if not profile.user:
+        await message.answer(
+            "Ошибка: не удалось загрузить данные пользователя.",
+            reply_markup=get_main_keyboard(is_admin=is_admin)
+        )
+        return
+    await mark_profile_as_viewed(message.from_user.id, profile.id)
+    await state.set_state(ProfileViewStates.view_profiles)
+    await state.update_data(current_profile_id=profile.id)
+    profile_text = (
+        f"👤 Анкета пользователя @{message.from_user.username}\n\n"
+        f"📝 Описание: {profile.description}\n"
+        f"⭐️ Средняя оценка: {sum(r.score for r in profile.received_ratings) / len(profile.received_ratings) if profile.received_ratings else 0}\n"
+        f"📊 Количество оценок: {len(profile.received_ratings)}"
+    )
+    if profile.video_id:
+        await message.answer_video(video=profile.video_id, caption=profile_text, reply_markup=get_rating_keyboard())
+    else:
+        await message.answer(
+            profile_text, reply_markup=get_rating_keyboard()
+        )
+
+@router.callback_query(F.data.startswith('score_'))
+async def process_rating_score(callback: CallbackQuery, state: FSMContext):
+    if not await state.get_state() == ProfileViewStates.view_profiles:
+        await callback.answer("Ошибка: неверное состояние", show_alert=True)
+        return
+    score = int(callback.data.split('_')[1])
+    data = await state.get_data()
+    profile_id = data.get('current_profile_id')
+    if not profile_id:
+        await callback.answer("Ошибка: анкета не найдена", show_alert=True)
+        return
+    user = await get_user(callback.from_user.id)
+    if not user:
+        await callback.answer("Ошибка: пользователь не найден", show_alert=True)
+        return
+    await mark_profile_as_viewed(callback.from_user.id, profile_id)
+    rating = await create_rating(user.id, profile_id, score, None)
+    if rating:
+        await callback.answer("✅ Спасибо за вашу оценку!")
+        await callback.message.delete()
+        await show_next_profile(callback.message, state)
+    else:
+        await callback.answer("Ошибка при сохранении оценки", show_alert=True)
+
+@router.callback_query(F.data == 'cancel_rating')
+async def back_from_rating(callback: CallbackQuery):
+    if callback.from_user.id == 1653541807:
+        is_admin=True
+    else:
+        is_admin=False
+    await callback.message.answer('Вы переместились а главное меню', reply_markup=get_main_keyboard(is_admin=is_admin))
+
+
+
+
+
+
+
+
+
 
 
 
