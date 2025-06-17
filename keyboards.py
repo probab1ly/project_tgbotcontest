@@ -6,8 +6,7 @@ def get_main_keyboard(is_admin: bool = False):
             KeyboardButton(text="👤 Моя анкета")
         ],
         [
-            KeyboardButton(text="👥 Оценить анкету"),
-            KeyboardButton(text="📊 Моя статистика")
+            KeyboardButton(text="👥 Оценить анкеты"),
         ]
     ]
 
@@ -34,24 +33,24 @@ def get_moderation_profile(profile_id: int):
             [
                 InlineKeyboardButton(text="✅ Одобрить", callback_data=f"verify_{profile_id}"),
                 InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_{profile_id}")
-            ],
-            [
-                InlineKeyboardButton(text="⏭ Следующая анкета", callback_data="next_profile")
             ]
         ]
     )
     return keyboard
+
+# def get_profile_view_keyboard(profile_id: int):
+
 def get_rating_keyboard():
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text='1', callback_data='rate_1'),
-                InlineKeyboardButton(text='2', callback_data='rate_2'),
-                InlineKeyboardButton(text='3', callback_data='rate_3'),
-                InlineKeyboardButton(text='4', callback_data='rate_4'),
-                InlineKeyboardButton(text='5', callback_data='rate_5'),
+                InlineKeyboardButton(text='1⭐', callback_data='score_1'),
+                InlineKeyboardButton(text='2⭐', callback_data='score_2'),
+                InlineKeyboardButton(text='3⭐', callback_data='score_3'),
+                InlineKeyboardButton(text='4⭐', callback_data='score_4'),
+                InlineKeyboardButton(text='5⭐', callback_data='score_5'),
             ],
-            [InlineKeyboardButton(text='Пропустить', callback_data='skip_rating')]
+            [InlineKeyboardButton(text='🔙 Назад', callback_data='cancel_rating')]
         ]
     )
     return keyboard
