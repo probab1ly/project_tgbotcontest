@@ -202,7 +202,7 @@ async def verify_profile(profile_id: int):
 async def reject_profile(profile_id: int):
     async with async_session() as session:
         result = await session.execute(
-            delete(Profile).options(selectinload(Profile.user)).where(Profile.id == profile_id)
+            select(Profile).options(selectinload(Profile.user)).where(Profile.id == profile_id)
         )
         profile = result.scalar_one_or_none()
         if profile:
