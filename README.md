@@ -18,68 +18,26 @@
 *** for contributors-url, forks-url, etc. This is an optional, concise syntax you may use.
 *** https://www.markdownguide.org/basic-syntax/#reference-style-links
 -->
-[![Contributors][contributors-shield]][contributors-url]
-[![Forks][forks-shield]][forks-url]
-[![Stargazers][stars-shield]][stars-url]
-[![Issues][issues-shield]][issues-url]
-[![Unlicense License][license-shield]][license-url]
-[![LinkedIn][linkedin-shield]][linkedin-url]
 
 
 
-<!-- PROJECT LOGO -->
-<br />
 <div align="center">
-  <a href="https://github.com/othneildrew/Best-README-Template">
-    <img src="images/logo.png" alt="Logo" width="80" height="80">
-  </a>
-
-  <h3 align="center">ContestVideos_bot</h3>
-
-  <p align="center">
-    Телеграм бот для проведения конкурсов <b>с использованием БД</b>
-  </p>
+  <h1 align="center">ContestVideos_bot</h1>  
+  <h3 align="center">Телеграм бот для проведения конкурсов <b>с использованием БД</b></h3>
 </div>
-
-
-
-<!-- TABLE OF CONTENTS -->
-<details>
-  <summary>Table of Contents</summary>
-  <ol>
-    <li>
-      <a href="#about-the-project">About The Project</a>
-      <ul>
-        <li><a href="#built-with">Built With</a></li>
-      </ul>
-    </li>
-    <li>
-      <a href="#getting-started">Getting Started</a>
-      <ul>
-        <li><a href="#prerequisites">Prerequisites</a></li>
-        <li><a href="#installation">Installation</a></li>
-      </ul>
-    </li>
-    <li><a href="#usage">Usage</a></li>
-    <li><a href="#roadmap">Roadmap</a></li>
-    <li><a href="#contributing">Contributing</a></li>
-    <li><a href="#license">License</a></li>
-    <li><a href="#contact">Contact</a></li>
-    <li><a href="#acknowledgments">Acknowledgments</a></li>
-  </ol>
-</details>
-
 
 
 <!-- ABOUT THE PROJECT -->
 # О чём проект
 
-[![Product Name Screen Shot][product-screenshot]](https://example.com)
+<div>   
+  <img src="logo.jpg" alt="Logo" width="210" height="420">  
+  <img src="logo2.jpg" alt="Logo" width="210" height="420">  
+</div>
 
 Этот Telegram-бот предназначен для проведения и организации масштабных конкурсов, челленджей и т.п.<br>
 Он поможет вам легко создавать различные конкурсы, управлять данными участников, просматривать и подводить итоги<br>
-Бот обеспечивает удобную панель управления для пользователей и отдельную админ панель для модераторов с особым функционалом, а также автоматическую обработку голосов и результатов<br>
-
+Бот обеспечивает удобную панель управления для пользователей и отдельную админ панель для модераторов с особым функционалом, а также автоматическую обработку голосов и результатов
 
 # Принцип работы
 
@@ -93,8 +51,6 @@
 * Для удобства по кнопке они могут просматривать все анкеты для утверждения
 * При помощи функционала админы могут сразу просматривать победителя в любой момент времени
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
 <!-- GETTING STARTED -->
 ## Описание функционала основных кнопок
 * <b>📝 Создать анкету</b>: Пользователь предоставляет описание и видео, после чего анкета отправляется на модерацию админу. До подтверждения он не может оценивать анкеты
@@ -106,23 +62,6 @@
 * <b>🎉 Кто победитель?</b>: Подсчитывает результаты и выдает пользователя с наилучшими показателями, то есть с наивысшей оценкой. При равенстве лучших оценок выдает победителя с наибольшим количеством голосов среди лидеров<b>(доступна только для модераторов)</b>
 * <b>✅ Одобрить</b>: Одобряет анкету<b>(доступна только для модераторов)</b>
 * <b>❌ Отклонить</b>: Отклоняет анкету<b>(доступна только для модераторов)</b>
-
-
-<!-- ACKNOWLEDGMENTS -->
-## Acknowledgments
-
-Use this space to list resources you find helpful and would like to give credit to. I've included a few of my favorites to kick things off!
-
-* [Choose an Open Source License](https://choosealicense.com)
-* [GitHub Emoji Cheat Sheet](https://www.webpagefx.com/tools/emoji-cheat-sheet)
-* [Malven's Flexbox Cheatsheet](https://flexbox.malven.co/)
-* [Malven's Grid Cheatsheet](https://grid.malven.co/)
-* [Img Shields](https://shields.io)
-* [GitHub Pages](https://pages.github.com)
-* [Font Awesome](https://fontawesome.com)
-* [React Icons](https://react-icons.github.io/react-icons/search)
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 
 
