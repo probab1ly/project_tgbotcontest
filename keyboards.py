@@ -11,9 +11,13 @@ def get_main_keyboard(is_admin: bool = False):
     ]
 
     if is_admin:
-        keyboard.append([
+        keyboard.append(
+        [
             KeyboardButton(text="👨‍💼 Модерация анкет"),
-        ])
+            KeyboardButton(text="🎉 Кто победитель?")
+        ]
+        )
+
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
 def get_moderation_keyboard():
@@ -38,8 +42,6 @@ def get_moderation_profile(profile_id: int):
     )
     return keyboard
 
-# def get_profile_view_keyboard(profile_id: int):
-
 def get_rating_keyboard():
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -49,8 +51,7 @@ def get_rating_keyboard():
                 InlineKeyboardButton(text='3⭐', callback_data='score_3'),
                 InlineKeyboardButton(text='4⭐', callback_data='score_4'),
                 InlineKeyboardButton(text='5⭐', callback_data='score_5'),
-            ],
-            [InlineKeyboardButton(text='🔙 Назад', callback_data='cancel_rating')]
+            ]
         ]
     )
     return keyboard
