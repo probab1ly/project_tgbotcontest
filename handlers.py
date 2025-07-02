@@ -54,7 +54,7 @@ async def show_profile_for_moderation(message: Message, profile):
     )
 
 async def next_profile(callback: CallbackQuery, state: FSMContext):#moderation
-    if callback.from_user.id != 1653541807:
+    if callback.from_user.id != *****:
         await callback.answer("У вас нет прав для этого действия")
         return
     data = await state.get_data()
@@ -139,7 +139,7 @@ async def show_next_profile(message: Message, state: FSMContext):#clients
 
 @router.message(Command('start'))
 async def start(message: Message):
-    if message.from_user.id == 1653541807:
+    if message.from_user.id == *****::
         is_admin=True
     else:
         is_admin=False
@@ -152,7 +152,7 @@ async def start(message: Message):
 
 @router.message(F.text == '📝 Создать анкету')
 async def create_profile_start(message: Message, state: FSMContext):
-    if message.from_user.id == 1653541807:
+    if message.from_user.id == *****::
         is_admin=True
     else:
         is_admin=False
@@ -181,7 +181,7 @@ async def process_description(message: Message, state: FSMContext):
 
 @router.message(ProfileStates.waiting_for_video, F.video)
 async def process_video(message: Message, state: FSMContext, bot: Bot):
-    if message.from_user.id == 1653541807:
+    if message.from_user.id == *****::
         is_admin=True
     else:
         is_admin=False
@@ -260,7 +260,7 @@ async def process_video(message: Message, state: FSMContext, bot: Bot):
         )
 @router.message(F.text=="👤 Моя анкета")
 async def show_profile(message: Message):
-    if message.from_user.id == 1653541807:
+    if message.from_user.id == *****::
         is_admin=True
     else:
         is_admin=False
@@ -327,7 +327,7 @@ async def process_edit_description(message: Message, state: FSMContext):
 
 @router.message(ProfileStates.waiting_for_edit_video)
 async def process_edit_video(message: Message, state: FSMContext, bot: Bot):
-    if message.from_user.id == 1653541807:
+    if message.from_user.id == *****::
         is_admin=True
     else:
         is_admin=False
@@ -370,7 +370,7 @@ async def process_edit_video(message: Message, state: FSMContext, bot: Bot):
             f"👤 Пользователь: @{message.from_user.username}\n"
             f"📝 Описание: {new_description}\n"
         )
-        await bot.send_video(chat_id='1653541807', video=profile.video_id, caption=admin_message, reply_markup=get_profile_edit())
+        await bot.send_video(chat_id='*****:', video=profile.video_id, caption=admin_message, reply_markup=get_profile_edit())
         await message.answer('Анкета отправлена на модерацию', reply_markup=get_main_keyboard(is_admin=is_admin))
     else:
         await message.answer(
@@ -390,7 +390,7 @@ async def delete_profile_handler(callback: CallbackQuery):
 
 @router.message(F.text == '👨‍💼 Модерация анкет')
 async def moderation_menu(message: Message):
-    if message.from_user.id != 1653541807:
+    if message.from_user.id != *****::
         await message.answer("У вас нет прав для доступа к этому разделу.")
         return
     await message.answer(
@@ -415,7 +415,7 @@ async def show_pending_profiles(message: Message, state: FSMContext):
 
 @router.message(F.text == '🔙 Назад')
 async def back_button(message: Message):
-    if message.from_user.id == 1653541807:
+    if message.from_user.id == *****::
         is_admin=True
     else:
         is_admin=False
@@ -425,7 +425,7 @@ async def back_button(message: Message):
 
 @router.callback_query(F.data.startswith('verify_'))
 async def verify_profile_handler(callback: CallbackQuery, bot: Bot, state: FSMContext):
-    if callback.from_user.id != 1653541807:
+    if callback.from_user.id != *****::
         await callback.answer("У вас нет прав для выполнения этого действия", show_alert=True)
         return
     profile_id = int(callback.data.split('_')[1])
@@ -454,7 +454,7 @@ async def reject_profile_handler(callback: CallbackQuery, bot: Bot, state: FSMCo
 
 @router.message(F.text == "👥 Оценить анкеты")
 async def start_rating_profiles(message: Message, state: FSMContext):
-    if message.from_user.id == 1653541807:
+    if message.from_user.id == *****::
         is_admin=True
     else:
         is_admin=False
@@ -538,7 +538,7 @@ async def process_rating_score(callback: CallbackQuery, state: FSMContext):
 
 @router.message(F.text == '🎉 Кто победитель?')
 async def show_winner(message: Message):
-    if message.from_user.id != 1653541807:
+    if message.from_user.id != *****::
         await message.answer("У вас нет прав для доступа к этому разделу.")
         return
     winner = await get_winner_profile()
