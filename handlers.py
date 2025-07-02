@@ -83,7 +83,7 @@ async def next_profile(callback: CallbackQuery, state: FSMContext):#moderation
         await callback.answer("Ошибка при загрузке анкеты")
 
 async def show_next_profile(message: Message, state: FSMContext):#clients
-    if message.from_user.id == 1653541807:
+    if message.from_user.id == *****::
         is_admin=True
     else:
         is_admin=False
@@ -401,7 +401,7 @@ async def moderation_menu(message: Message):
 
 @router.message(F.text == '📋 Анкеты на модерации')
 async def show_pending_profiles(message: Message, state: FSMContext):
-    if message.from_user.id != 1653541807:
+    if message.from_user.id != *****::
         await message.answer("У вас нет прав для доступа к этому разделу.")
         return
     profiles = await get_need_profiles()
@@ -438,7 +438,7 @@ async def verify_profile_handler(callback: CallbackQuery, bot: Bot, state: FSMCo
 
 @router.callback_query(F.data.startswith('reject_'))
 async def reject_profile_handler(callback: CallbackQuery, bot: Bot, state: FSMContext):
-    if callback.from_user.id != 1653541807:
+    if callback.from_user.id != *****::
         await callback.answer("У вас нет прав для выполнения этого действия", show_alert=True)
         return
     profile_id = int(callback.data.split('_')[1])
