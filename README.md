@@ -21,8 +21,13 @@
 
 
 
+
+
+
+[![Typing SVG](https://readme-typing-svg.demolab.com/?duration=4500&color=FFFFFF&center=True&width=1100&height=74&size=46&font=Tektur&lines=ContestVideos_bot)](https://git.io/typing-svg)
+============================================================================================================================
+
 <div align="center">
-  <h1 align="center">ContestVideos_bot</h1>  
   <h3 align="center">Телеграм бот для проведения конкурсов <b>с использованием БД</b></h3>
 </div>
 
