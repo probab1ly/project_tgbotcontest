@@ -60,17 +60,20 @@ async def create_user(telegram_id: int, username: str):
         logger.info(f"Создан новый пользователь: id={user.id}, telegram_id={telegram_id}")
         return user
 
-async def create_profile(user_id: int, description: str, video_id: str):
+async def create_profile(user_id: int, description: str, category: str, video_id: str | None, photo_id: str | None):
     async with async_session() as session:
         user_result = await session.execute(
             select(User).where(User.id == user_id)
         )
         user = user_result.scalar_one_or_none()
+        # Проверяем, есть ли уже анкета у пользователя
         existing_profile_result = await session.execute(
             select(Profile).where(Profile.user_id == user.id)
         )
-
-        profile = Profile(user_id=user_id, description=description, video_id=video_id, is_verified=False)
+        existing_profile = existing_profile_result.scalar_one_or_none()
+        if existing_profile:
+            return existing_profile
+        profile = Profile(user_id=user_id, description=description, category=category, video_id=video_id, photo_id=photo_id, is_verified=False)
         session.add(profile)
         await session.commit()
         await session.refresh(profile)
@@ -102,16 +105,19 @@ async def get_random_profile(ex_user_id: int):
         for p in all_profiles:
             print(f"DEBUG: Анкета profile_id={p.id}, user_id={p.user_id}, is_verified={p.is_verified}")
         
-        # Загружаем профиль с пользователем и рейтингами в одной сессии
+        # Формируем условия для выборки
+        conditions = [
+            Profile.is_verified == True,
+            Profile.user_id != user.id
+        ]
+        if viewed_profile_ids:
+            conditions.append(~Profile.id.in_(viewed_profile_ids))
+        
         query = select(Profile).options(
             selectinload(Profile.user), 
             selectinload(Profile.received_ratings)
         ).where(
-            and_(
-                Profile.is_verified == True,
-                Profile.user_id != user.id,
-                ~Profile.id.in_(viewed_profile_ids) if viewed_profile_ids else True
-            )
+            and_(*conditions)
         ).order_by(func.random()).limit(1)
         
         result = await session.execute(query)
@@ -155,6 +161,7 @@ async def mark_profile_as_viewed(viewer_telegram_id: int, profile_id: int):
             logger.info(f"Создан новый просмотр: пользователь {viewer_telegram_id}, анкета {profile_id}")
         await session.commit()
         return True
+    
 async def create_rating(rater_id: int, profile_id: int, score: float, comment: str):
     async with async_session() as session:
         rating = Rating(rater_id=rater_id, profile_id=profile_id, score=score, comment=comment)
@@ -165,7 +172,7 @@ async def create_rating(rater_id: int, profile_id: int, score: float, comment: s
 async def delete_ex_profiles():
     async with async_session() as session:
         result = await session.execute(
-            select(Profile).where(Profile.delete_at <= datetime.utcnow)
+            select(Profile).where(Profile.delete_at <= datetime.utcnow())
         )
         ex_profiles = result.scalars().all()
         for profile in ex_profiles:
@@ -186,23 +193,29 @@ async def get_profile_info(profile_id: int):
             days = (profile.delete_at - datetime.utcnow()).days
             return profile.delete_at, days
         else:
-            return None, 0
-async def edit_profile(profile_id: int, description: str, video_id: str):
+            return None, False
+async def edit_profile(profile_id: int, description: str, category: str, video_id: str | None, photo_id: str | None):
     async with async_session() as session:
         result = await session.execute(
             select(Profile).where(Profile.id == profile_id)
         )
-        profile = result.scalar_one_or_none()
-        if profile:
-            if description is not None:
-                profile.description = description
-            if video_id is not None:
-                profile.video_id = video_id
-            # Сбрасываем статус верификации при редактировании
-            profile.is_verified = False
+        old_profile = result.scalar_one_or_none()
+        if old_profile:
+            # Создаём новую анкету с новыми данными, is_verified=False
+            new_profile = Profile(
+                user_id=old_profile.user_id,
+                description=description or old_profile.description,
+                category=category or old_profile.category,
+                video_id=video_id,
+                photo_id=photo_id,
+                is_verified=False
+            )
+            session.add(new_profile)
             await session.commit()
-            return profile
+            await session.refresh(new_profile)
+            return new_profile
         return None
+    
 async def delete_profile(profile_id: int):
     async with async_session() as session:
         result = await session.execute(
@@ -223,6 +236,7 @@ async def delete_profile(profile_id: int):
             await session.commit()
             return True
         return False
+    
 async def get_user_profile_with_rating(telegram_id: int):
     async with async_session() as session:
         user_result = await session.execute(
@@ -263,24 +277,14 @@ async def verify_profile(profile_id: int):
 async def reject_profile(profile_id: int):
     async with async_session() as session:
         result = await session.execute(
-            select(Profile).options(
-                selectinload(Profile.user),
-                selectinload(Profile.received_ratings)
-            ).where(Profile.id == profile_id)
+            select(Profile).where(Profile.id == profile_id)
         )
         profile = result.scalar_one_or_none()
-        if profile:
-            # Принудительно загружаем связанные данные в рамках текущей сессии
-            await session.refresh(profile, attribute_names=['user', 'received_ratings'])
-            user_telegram_id = profile.user.telegram_id
-            user_username = profile.user.username
-            await session.execute(
-                delete(Rating).where(Rating.profile_id == profile_id)
-            )
+        if profile and not profile.is_verified:
             await session.delete(profile)
             await session.commit()
-            return {'id': profile.id, 'telegram_id': user_telegram_id, 'username': user_username}
-        return None
+            return True
+        return False
 
 async def get_need_profiles():
     async with async_session() as session:
@@ -319,7 +323,7 @@ async def get_unviewed_profiles_count(viewer_telegram_id: int):
         user = user_result.scalar_one_or_none()
 
         if not user:
-            return 0
+            return False
 
         # Получаем ID просмотренных анкет
         viewed_profiles_result = await session.execute(
@@ -360,13 +364,12 @@ async def get_winner_profile():
         for profile in profiles:
             ratings = profile.received_ratings
             avg = sum(r.score for r in ratings) / len(ratings) if ratings else 0
-            count = len(ratings)
-            if (avg > max_avg) or (avg == max_avg and count> max_count):
+            count = len(ratings) if len(ratings) != 0 else 0
+            if (avg > max_avg) or (avg == max_avg and count > max_count):
                 winner = profile
                 max_avg = avg
                 max_count = count
         return winner
-
 
 
 
