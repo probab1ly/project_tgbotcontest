@@ -1,45 +1,51 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey
-from sqlalchemy.orm import declarative_base, relationship
+from sqlalchemy import ForeignKey
+from sqlalchemy.orm import DeclarativeBase, relationship, Mapped, mapped_column
 from datetime import datetime, timedelta
-Base = declarative_base()
+
+class Base(DeclarativeBase):
+    pass
+
 class User(Base):
     __tablename__ = 'users'
-    id = Column(Integer, primary_key=True)
-    telegram_id = Column(Integer, unique=True)
-    username = Column(String)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    profile = relationship('Profile', back_populates='user', uselist=False)
-    given_ratings = relationship('Rating', back_populates='rater')
-    profile_views = relationship('ProfileView', back_populates='viewer')
+    id: Mapped[int] = mapped_column(primary_key=True)
+    telegram_id: Mapped[int] = mapped_column(unique=True)
+    username: Mapped[str]
+    created_at: Mapped[datetime] = mapped_column(default=datetime.now)
+    profile: Mapped['Profile'] = relationship(back_populates='user', uselist=False)
+    given_ratings: Mapped['Rating'] = relationship(back_populates='rater')
+    profile_views: Mapped['ProfileView'] = relationship(back_populates='viewer')
+
 class Profile(Base):
     __tablename__ = 'profiles'
-    id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey('users.id'))
-    description = Column(String)
-    photo_id = Column(String)
-    video_id = Column(String)
-    is_verified = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    delete_at = Column(DateTime, default=datetime.utcnow()+timedelta(days=30))
-    user = relationship('User', back_populates='profile')
-    received_ratings = relationship('Rating', back_populates='profile')
-    viewed_by = relationship('ProfileView', back_populates='profile')
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id'))
+    description: Mapped[str]
+    category: Mapped[str]
+    photo_id: Mapped[str] = mapped_column(nullable=True)
+    video_id: Mapped[str] = mapped_column(nullable=True)
+    is_verified: Mapped[bool] = mapped_column(default=False)
+    created_at: Mapped[datetime] = mapped_column(default=datetime.now)
+    delete_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now()+timedelta(days=30))
+    user: Mapped['User'] = relationship(back_populates='profile')
+    received_ratings: Mapped['Rating'] = relationship(back_populates='profile')
+    viewed_by: Mapped['ProfileView'] = relationship(back_populates='profile')
+
 class Rating(Base):
     __tablename__ = 'ratings'
-    id = Column(Integer, primary_key=True)
-    rater_id = Column(Integer, ForeignKey('users.id'))
-    profile_id = Column(Integer, ForeignKey('profiles.id'))
-    score = Column(Float)
-    comment = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    rater = relationship('User', back_populates='given_ratings')
-    profile = relationship('Profile', back_populates='received_ratings')
+    id: Mapped[int] = mapped_column(primary_key=True)
+    rater_id: Mapped[int] = mapped_column(ForeignKey('users.id'))
+    profile_id: Mapped[int] = mapped_column(ForeignKey('profiles.id'))
+    score: Mapped[float]
+    comment: Mapped[str] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=datetime.now)
+    rater: Mapped['User'] = relationship(back_populates='given_ratings')
+    profile: Mapped['Profile'] = relationship(back_populates='received_ratings')
 
 class ProfileView(Base):
     __tablename__ = 'profile_views'
-    id = Column(Integer, primary_key=True)
-    viewer_id = Column(Integer, ForeignKey('users.id'))
-    profile_id = Column(Integer, ForeignKey('profiles.id'))
-    viewed_at = Column(DateTime, default=datetime.utcnow)
-    viewer = relationship('User', back_populates='profile_views')
-    profile = relationship('Profile', back_populates='viewed_by')
+    id: Mapped[int] = mapped_column(primary_key=True)
+    viewer_id: Mapped[int] = mapped_column(ForeignKey('users.id'))
+    profile_id: Mapped[int] = mapped_column(ForeignKey('profiles.id'))
+    viewed_at: Mapped[datetime] = mapped_column(default=datetime.now)
+    viewer: Mapped['User'] = relationship(back_populates='profile_views')
+    profile: Mapped['Profile'] = relationship(back_populates='viewed_by')
