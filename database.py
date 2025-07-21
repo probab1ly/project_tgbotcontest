@@ -363,19 +363,25 @@ async def get_winner_profile():
         winner = None
         max_avg = -1
         max_count = -1
-        # Принудительно загружаем связанные данные для всех профилей
         for profile in profiles:
             ratings = profile.received_ratings
             if not ratings:
                 ratings = []
             elif not isinstance(ratings, list):
                 ratings = [ratings]
-            avg = sum(r.score for r in ratings) / len(ratings) if ratings else 0
             count = len(ratings)
-            if (avg > max_avg) or (avg == max_avg and count > max_count):
+            if count < 5:
+                continue  # Пропускаем профили с менее чем 5 оценками
+            avg = sum(r.score for r in ratings) / count if ratings else 0
+            if avg > max_avg + 0.3:
                 winner = profile
                 max_avg = avg
                 max_count = count
+            elif abs(avg - max_avg) <= 0.3:
+                if count > max_count:
+                    winner = profile
+                    max_avg = avg
+                    max_count = count
         return winner
 
 async def periodic_delete():
