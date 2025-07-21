@@ -25,7 +25,7 @@ class Profile(Base):
     video_id: Mapped[str] = mapped_column(nullable=True)
     is_verified: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(default=datetime.now)
-    delete_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now()+timedelta(days=30))
+    delete_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now()+timedelta(days=7))
     user: Mapped['User'] = relationship(back_populates='profile')
     received_ratings: Mapped['Rating'] = relationship(back_populates='profile')
     viewed_by: Mapped['ProfileView'] = relationship(back_populates='profile')
