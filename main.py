@@ -1,8 +1,8 @@
-import asyncio
-import logging
 from aiogram import Bot, Dispatcher
 from handlers import router
-from database import init_db
+from database import init_db, periodic_delete
+import asyncio
+import logging
 
 async def main():
     logging.basicConfig(level=logging.INFO)
@@ -10,6 +10,7 @@ async def main():
     bot = Bot(token='')
     dp = Dispatcher()
     dp.include_router(router)
+    asyncio.create_task(periodic_delete())
     await dp.start_polling(bot)
 
 if __name__ == '__main__':
