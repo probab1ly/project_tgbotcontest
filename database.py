@@ -28,21 +28,26 @@ async def get_user(telegram_id: int):
 
 async def get_user_profile(telegram_id: int):
     async with async_session() as session:
+        # Сначала ищем одобренную анкету
         result = await session.execute(
-            select(Profile).options(
-                selectinload(Profile.user),
-                selectinload(Profile.received_ratings)
-            ).join(User, Profile.user_id == User.id).where(User.telegram_id == telegram_id).order_by(desc(Profile.created_at)).limit(1)
+            select(Profile)
+            .options(selectinload(Profile.user), selectinload(Profile.received_ratings))
+            .join(User, Profile.user_id == User.id)
+            .where(User.telegram_id == telegram_id, Profile.is_verified == True)
+            .order_by(Profile.created_at.desc())
         )
         profile = result.scalar_one_or_none()
         if profile:
-            # Принудительно загружаем связанные данные в рамках текущей сессии
-            await session.refresh(profile, attribute_names=['user', 'received_ratings'])
-            logger.info(f"Найден профиль пользователя: telegram_id={telegram_id}")
             return profile
-        else:
-            logger.info(f"Профиль не найден: telegram_id={telegram_id}")
-            return None
+        # Если одобренной нет — возвращаем последнюю любую анкету
+        result = await session.execute(
+            select(Profile)
+            .options(selectinload(Profile.user), selectinload(Profile.received_ratings))
+            .join(User, Profile.user_id == User.id)
+            .where(User.telegram_id == telegram_id)
+            .order_by(Profile.created_at.desc())
+        )
+        return result.scalar_one_or_none()
 
 
 async def create_user(telegram_id: int, username: str):
@@ -353,18 +358,18 @@ async def get_winner_profile():
         profiles = result.scalars().all()
         if not profiles:
             return None
-        
-        # Принудительно загружаем связанные данные для всех профилей
-        for profile in profiles:
-            await session.refresh(profile, attribute_names=['user', 'received_ratings'])
-        
         winner = None
         max_avg = -1
         max_count = -1
+        # Принудительно загружаем связанные данные для всех профилей
         for profile in profiles:
             ratings = profile.received_ratings
+            if not ratings:
+                ratings = []
+            elif not isinstance(ratings, list):
+                ratings = [ratings]
             avg = sum(r.score for r in ratings) / len(ratings) if ratings else 0
-            count = len(ratings) if len(ratings) != 0 else 0
+            count = len(ratings)
             if (avg > max_avg) or (avg == max_avg and count > max_count):
                 winner = profile
                 max_avg = avg
