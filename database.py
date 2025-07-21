@@ -5,6 +5,8 @@ from sqlalchemy import func, and_, desc, delete
 from models import Base, User, Profile, Rating, ProfileView
 from datetime import datetime
 import logging
+import asyncio
+
 logger = logging.getLogger(__name__)
 engine = create_async_engine('sqlite+aiosqlite:///bot.db', echo=True)
 async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -376,8 +378,10 @@ async def get_winner_profile():
                 max_count = count
         return winner
 
-
-
+async def periodic_delete():
+    while True:
+        await delete_ex_profiles()
+        await asyncio.sleep(86400)
 
 
 
