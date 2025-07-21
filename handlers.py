@@ -225,10 +225,7 @@ async def process_video(message: Message, state: FSMContext, bot: Bot):
 
     user = await get_user(message.from_user.id)
     if not user:
-        logger.error(f"Пользователь не найден при создании анкеты: {message.from_user.id}")
-        await message.answer("⚠️ Произошла ошибка при создании анкеты. Пожалуйста, используйте команду /start")
-        await state.clear()
-        return
+        user = await create_user(message.from_user.id, message.from_user.username)
     
     video = message.video
     if not video:
@@ -291,7 +288,7 @@ async def process_video(message: Message, state: FSMContext, bot: Bot):
         )
 
 @router.message(ProfileStates.waiting_for_video, F.photo)
-async def process_video(message: Message, state: FSMContext, bot: Bot):
+async def process_photo(message: Message, state: FSMContext, bot: Bot):
     if message.from_user.id == 1653541807:
         is_admin=True
     else:
@@ -299,16 +296,13 @@ async def process_video(message: Message, state: FSMContext, bot: Bot):
     data = await state.get_data()
     if not data or 'description' not in data or 'category' not in data:
         logger.error('Отсутствуют данные описания в состоянии')
-        await message.answer('⚠️ Произошла ошибка. Пожалуйста, создайте анкету заново.')
+        await message.answer('⚠️ Произошла ошибка. Пожалуйста, создайте анкету заново')
         await state.clear()
         return
 
     user = await get_user(message.from_user.id)
     if not user:
-        logger.error(f"Пользователь не найден при создании анкеты: {message.from_user.id}")
-        await message.answer("⚠️ ОшибкаПожалуйста, используйте команду /start")
-        await state.clear()
-        return
+        user = await create_user(message.from_user.id, message.from_user.username)
     
     photo = message.photo[-1]
     if not photo:
@@ -316,13 +310,13 @@ async def process_video(message: Message, state: FSMContext, bot: Bot):
         return
 
     photo_id = photo.file_id
-    logger.info(f"Получен file_id видео: {photo_id}, тип: {type(photo_id)}")
+    logger.info(f"Получен file_id фото: {photo_id}, тип: {type(photo_id)}")
     # if hasattr(video, 'thumbnail') and video.thumbnail:
     #     photo_id = video.thumbnail.file_id
     if not photo_id:
-        logger.error("Не удалось получить file_id из видео")
+        logger.error("Не удалось получить file_id из фото")
         await message.answer(
-            "⚠️ Не удалось обработать видео. Пожалуйста, попробуйте отправить другое видео"
+            "⚠️ Не удалось обработать фото. Пожалуйста, попробуйте отправить другое фото"
         )
         return
 
@@ -376,11 +370,8 @@ async def process_skip_media(message: Message, state: FSMContext, bot: Bot):
 
     user = await get_user(message.from_user.id)
     if not user:
-        logger.error(f"Пользователь не найден при создании анкеты: {message.from_user.id}")
-        await message.answer("⚠️ Произошла ошибка при создании анкеты. Пожалуйста, напишите команду /start")
-        await state.clear()
-        return
-
+        user = await create_user(message.from_user.id, message.from_user.username)
+    
     profile = await create_profile(
         user_id=user.id,
         description=data['description'],
@@ -446,7 +437,11 @@ async def show_profile(message: Message):
         return
     
     delete_at, days = await get_profile_info(profile.id)
-    ratings = profile.received_ratings or []
+    ratings = profile.received_ratings
+    if not ratings:
+        ratings = []
+    elif not isinstance(ratings, list):
+        ratings = [ratings]
     avg_rating = sum(r.score for r in ratings)/len(ratings) if ratings else 0
     status_text = "✅ Одобрена" if profile.is_verified else "⏳ На модерации"
     profile_text = (
@@ -616,11 +611,8 @@ async def process_skip_media(message: Message, state: FSMContext, bot: Bot):
 
     user = await get_user(message.from_user.id)
     if not user:
-        logger.error(f"Пользователь не найден при создании анкеты: {message.from_user.id}")
-        await message.answer("⚠️ Произошла ошибка при создании анкеты. Пожалуйста, используйте команду /start")
-        await state.clear()
-        return
-
+        user = await create_user(message.from_user.id, message.from_user.username)
+    
     profile = await create_profile(
         user_id=user.id,
         description=data['description'],
@@ -774,7 +766,9 @@ async def start_rating_profiles(message: Message, state: FSMContext):
     await state.update_data(current_profile_id=profile.id)
     
     # Безопасно обрабатываем рейтинги
-    ratings = profile.received_ratings or []
+    ratings = profile.received_ratings
+    if not ratings:
+        ratings = []
     avg_rating = round(sum(r.score for r in ratings) / len(ratings), 1) if ratings else 0
     
     profile_text = (
@@ -830,9 +824,12 @@ async def show_winner(message: Message):
     if not winner or not winner.user:
         await message.answer("⚠️ Нет анкет для определения победителя")
         return
-    
-    # Безопасно обрабатываем рейтинги
-    ratings = winner.received_ratings or []
+
+    ratings = winner.received_ratings
+    if not ratings:
+        ratings = []
+    elif not isinstance(ratings, list):
+        ratings = [ratings]
     avg_rating = sum(r.score for r in ratings) / len(ratings) if ratings else 0
     
     profile_text = (
@@ -845,8 +842,10 @@ async def show_winner(message: Message):
     )
     if winner.video_id:
         await message.answer_video(video=winner.video_id, caption=profile_text)
+    elif winner.photo_id:
+        await message.answer_photo(photo=winner.photo_id, caption=profile_text)
     else:
-        await message.answer(profile_text)
+        await message.answer(text=profile_text)
 
 
 
