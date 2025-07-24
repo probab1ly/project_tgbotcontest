@@ -201,7 +201,7 @@ async def get_profile_info(profile_id: int):
             return profile.delete_at, days
         else:
             return None, False
-async def edit_profile(profile_id: int, description: str, category: str, video_id: str | None, photo_id: str | None):
+async def edit_profile(profile_id: int, description: str, category: str, video_id: str | None, photo_id: str | None): 
     async with async_session() as session:
         result = await session.execute(
             select(Profile).where(Profile.id == profile_id)
