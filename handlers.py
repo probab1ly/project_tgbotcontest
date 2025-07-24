@@ -18,6 +18,28 @@ from database import (
     verify_profile, reject_profile, mark_profile_as_viewed,
     get_unviewed_profiles_count, get_winner_profile
 )
+from typing import Callable, Awaitable
+import time
+
+# # Глобальный кэш: (user_id, media_group_id) -> timestamp
+# warned_media_groups_cache = {}
+
+# def cleanup_warned_cache(ttl=60):
+#     now = time.time()
+#     to_delete = [key for key, t in warned_media_groups_cache.items() if now - t > ttl]
+#     for key in to_delete:
+#         del warned_media_groups_cache[key]
+
+# async def warn_once_for_media_group(message: Message, warn_text: str, ttl=60) -> bool:
+#     if message.media_group_id is not None:
+#         cleanup_warned_cache(ttl)
+#         key = (message.from_user.id, message.media_group_id)
+#         if key in warned_media_groups_cache:
+#             return True
+#         await message.answer(warn_text)
+#         warned_media_groups_cache[key] = time.time()
+#         return True
+#     return False
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -212,6 +234,9 @@ async def process_category(message: Message, state: FSMContext):
 
 @router.message(ProfileStates.waiting_for_video, F.video)
 async def process_video(message: Message, state: FSMContext, bot: Bot):
+    if message.media_group_id is not None:
+        await message.answer("⚠️ Пожалуйста, отправьте только одно видео для анкеты")
+        return
     if message.from_user.id == 1653541807:
         is_admin=True
     else:
@@ -264,6 +289,7 @@ async def process_video(message: Message, state: FSMContext, bot: Bot):
             date_str = delete_at.strftime('%d.%m.%Y %H:%M')
         else:
             date_str = 'неизвестно'
+        await state.update_data(warned_media_groups=[])
         await state.clear()
 
         await message.answer(
@@ -289,6 +315,9 @@ async def process_video(message: Message, state: FSMContext, bot: Bot):
 
 @router.message(ProfileStates.waiting_for_video, F.photo)
 async def process_photo(message: Message, state: FSMContext, bot: Bot):
+    if message.media_group_id is not None:
+        await message.answer("⚠️ Пожалуйста, отправьте только одно видео для анкеты")
+        return
     if message.from_user.id == 1653541807:
         is_admin=True
     else:
@@ -333,6 +362,7 @@ async def process_photo(message: Message, state: FSMContext, bot: Bot):
             date_str = delete_at.strftime('%d.%m.%Y %H:%M')
         else:
             date_str = 'неизвестно'
+        await state.update_data(warned_media_groups=[])
         await state.clear()
 
         await message.answer(
@@ -385,6 +415,7 @@ async def process_skip_media(message: Message, state: FSMContext, bot: Bot):
             date_str = delete_at.strftime('%d.%m.%Y %H:%M')
         else:
             date_str = 'неизвестно'
+        await state.update_data(warned_media_groups=[])
         await state.clear()
 
         await message.answer(
@@ -510,10 +541,13 @@ async def process_edit_category(message: Message, state: FSMContext):
         return
     await state.update_data(category=message.text)
     await state.set_state(ProfileStates.waiting_for_edit_video)
-    await message.answer("📷 Хорошо, теперь отправьте новое видео для анкеты(или напишите 'пропустить' для сохранения старого видео)")
+    await message.answer("📷 Хорошо, теперь отправьте новое видео или фото для анкеты(или напишите 'пропустить' для сохранения старого видео)")
 
 @router.message(ProfileStates.waiting_for_edit_video, F.video)
 async def process_edit_video(message: Message, state: FSMContext, bot: Bot):
+    if message.media_group_id is not None:
+        await message.answer("⚠️ Пожалуйста, отправьте только одно видео для анкеты")
+        return
     if message.from_user.id == 1653541807:
         is_admin=True
     else:
@@ -555,10 +589,14 @@ async def process_edit_video(message: Message, state: FSMContext, bot: Bot):
             "⚠️ Произошла ошибка при обновлении анкеты. Пожалуйста, попробуйте позже.",
             reply_markup=get_main_keyboard(is_admin=is_admin)
         )
+    await state.update_data(warned_media_groups=[])
     await state.clear()
 
 @router.message(ProfileStates.waiting_for_edit_video, F.photo)
 async def process_edit_photo(message: Message, state: FSMContext, bot: Bot):
+    if message.media_group_id is not None:
+        await message.answer("⚠️ Пожалуйста, отправьте только одно видео для анкеты")
+        return
     if message.from_user.id == 1653541807:
         is_admin=True
     else:
@@ -594,6 +632,7 @@ async def process_edit_photo(message: Message, state: FSMContext, bot: Bot):
             "⚠️ Произошла ошибка при обновлении анкеты. Пожалуйста, попробуйте позже.",
             reply_markup=get_main_keyboard(is_admin=is_admin)
         )
+    await state.update_data(warned_media_groups=[])
     await state.clear()
 
 @router.message(ProfileStates.waiting_for_edit_video, F.text.lower() == 'пропустить')
@@ -626,6 +665,7 @@ async def process_skip_media(message: Message, state: FSMContext, bot: Bot):
             date_str = delete_at.strftime('%d.%m.%Y %H:%M')
         else:
             date_str = 'неизвестно'
+        await state.update_data(warned_media_groups=[])
         await state.clear()
 
         await message.answer(
