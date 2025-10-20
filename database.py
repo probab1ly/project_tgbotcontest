@@ -1,19 +1,69 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, selectinload
 from sqlalchemy.future import select
-from sqlalchemy import func, and_, desc, delete
+from sqlalchemy import func, and_, desc, delete, text
 from models import Base, User, Profile, Rating, ProfileView
 from datetime import datetime
 import logging
 import asyncio
+import os
 
 logger = logging.getLogger(__name__)
-engine = create_async_engine('sqlite+aiosqlite:///bot.db', echo=True)
-async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+# Создаем движок и session maker отдельно, чтобы избежать проблем с пересозданием
+engine = None
+async_session = None
 
 async def init_db():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    """Инициализация базы данных с проверкой и исправлением схемы"""
+    global engine, async_session
+    
+    try:
+        # Проверяем, есть ли проблема с существующей базой данных
+        db_needs_recreation = False
+        
+        if os.path.exists('bot.db'):
+            try:
+                # Создаем временное соединение для проверки схемы
+                temp_engine = create_async_engine('sqlite+aiosqlite:///bot.db', echo=False)
+                async with temp_engine.begin() as conn:
+                    result = await conn.execute(text("PRAGMA table_info(users)"))
+                    columns = result.fetchall()
+                    
+                    if columns:  # Если таблица существует
+                        username_column = next((col for col in columns if col[1] == 'username'), None)
+                        if username_column and username_column[3]:  # NOT NULL ограничение есть
+                            logger.info("Обнаружена проблема с NOT NULL ограничением в поле username.")
+                            logger.info("База данных будет пересоздана.")
+                            db_needs_recreation = True
+                await temp_engine.dispose()
+            except Exception as e:
+                logger.warning(f"Не удалось проверить схему базы данных: {e}")
+                db_needs_recreation = True
+        
+        # Если база данных проблемная, удаляем её
+        if db_needs_recreation and os.path.exists('bot.db'):
+            os.remove('bot.db')
+            logger.info("Старая база данных удалена")
+        
+        # Создаем или пересоздаем движок и session maker
+        engine = create_async_engine('sqlite+aiosqlite:///bot.db', echo=True)
+        async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        
+        # Создаем базу данных с правильной схемой
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            logger.info("База данных инициализирована с правильной схемой")
+            
+    except Exception as e:
+        logger.error(f"Ошибка при инициализации базы данных: {e}")
+        raise
+
+# Инициализируем переменные, если они еще не созданы
+if engine is None:
+    engine = create_async_engine('sqlite+aiosqlite:///bot.db', echo=True)
+if async_session is None:
+    async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 async def get_user(telegram_id: int):
     async with async_session() as session:
@@ -52,20 +102,27 @@ async def get_user_profile(telegram_id: int):
         return result.scalar_one_or_none()
 
 
-async def create_user(telegram_id: int, username: str):
+async def create_user(telegram_id: int, username: str | None):
     async with async_session() as session:
-        existing_user_result = await session.execute(
-            select(User).where(User.telegram_id == telegram_id)
-        )
-        existing_user = existing_user_result.scalar_one_or_none()
-        if existing_user:
-            logger.info(f"Пользователь уже существует: telegram_id={telegram_id}")
-            return existing_user
-        user = User(telegram_id=telegram_id, username=username)
-        session.add(user)
-        await session.commit()
-        logger.info(f"Создан новый пользователь: id={user.id}, telegram_id={telegram_id}")
-        return user
+        try:
+            existing_user_result = await session.execute(
+                select(User).where(User.telegram_id == telegram_id)
+            )
+            existing_user = existing_user_result.scalar_one_or_none()
+            if existing_user:
+                logger.info(f"Пользователь уже существует: telegram_id={telegram_id}")
+                return existing_user
+            
+            # Убеждаемся, что username может быть None
+            user = User(telegram_id=telegram_id, username=username)
+            session.add(user)
+            await session.commit()
+            logger.info(f"Создан новый пользователь: id={user.id}, telegram_id={telegram_id}, username={username}")
+            return user
+        except Exception as e:
+            logger.error(f"Ошибка при создании пользователя {telegram_id}: {e}")
+            await session.rollback()
+            raise
 
 async def create_profile(user_id: int, description: str, category: str, video_id: str | None, photo_id: str | None):
     async with async_session() as session:
@@ -73,17 +130,15 @@ async def create_profile(user_id: int, description: str, category: str, video_id
             select(User).where(User.id == user_id)
         )
         user = user_result.scalar_one_or_none()
-        # Проверяем, есть ли уже анкета у пользователя
-        existing_profile_result = await session.execute(
-            select(Profile).where(Profile.user_id == user.id)
-        )
-        existing_profile = existing_profile_result.scalar_one_or_none()
-        if existing_profile:
-            return existing_profile
+        if not user:
+            logger.error(f"Пользователь не найден: user_id={user_id}")
+            return None
+        
         profile = Profile(user_id=user_id, description=description, category=category, video_id=video_id, photo_id=photo_id, is_verified=False)
         session.add(profile)
         await session.commit()
         await session.refresh(profile)
+        logger.info(f"Создана новая анкета: id={profile.id}, user_id={user_id}")
         return profile
 
 async def get_random_profile(ex_user_id: int):
@@ -360,18 +415,16 @@ async def get_winner_profile():
         profiles = result.scalars().all()
         if not profiles:
             return None
+
+        # Сначала пробуем строгие правила (>=5 оценок и разница в 0.3)
         winner = None
-        max_avg = -1
+        max_avg = -1.0
         max_count = -1
         for profile in profiles:
-            ratings = profile.received_ratings
-            if not ratings:
-                ratings = []
-            elif not isinstance(ratings, list):
-                ratings = [ratings]
+            ratings = profile.received_ratings or []
             count = len(ratings)
             if count < 5:
-                continue  # Пропускаем профили с менее чем 5 оценками
+                continue
             avg = sum(r.score for r in ratings) / count if ratings else 0
             if avg > max_avg + 0.3:
                 winner = profile
@@ -382,7 +435,30 @@ async def get_winner_profile():
                     winner = profile
                     max_avg = avg
                     max_count = count
-        return winner
+
+        if winner:
+            return winner
+
+        # Fallback: если нет профилей с >=5 оценками, выбираем лучшего из тех, у кого >=1
+        fallback_winner = None
+        fallback_max_avg = -1.0
+        fallback_max_count = -1
+        for profile in profiles:
+            ratings = profile.received_ratings or []
+            count = len(ratings)
+            if count == 0:
+                continue
+            avg = sum(r.score for r in ratings) / count
+            if avg > fallback_max_avg:
+                fallback_winner = profile
+                fallback_max_avg = avg
+                fallback_max_count = count
+            elif abs(avg - fallback_max_avg) < 1e-9:
+                if count > fallback_max_count:
+                    fallback_winner = profile
+                    fallback_max_avg = avg
+                    fallback_max_count = count
+        return fallback_winner
 
 async def periodic_delete():
     while True:
