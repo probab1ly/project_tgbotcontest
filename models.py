@@ -9,11 +9,11 @@ class User(Base):
     __tablename__ = 'users'
     id: Mapped[int] = mapped_column(primary_key=True)
     telegram_id: Mapped[int] = mapped_column(unique=True)
-    username: Mapped[str]
+    username: Mapped[str | None] = mapped_column(nullable=True)  # Может быть None, если пользователь не установил username в Telegram
     created_at: Mapped[datetime] = mapped_column(default=datetime.now)
     profile: Mapped['Profile'] = relationship(back_populates='user', uselist=False)
-    given_ratings: Mapped['Rating'] = relationship(back_populates='rater')
-    profile_views: Mapped['ProfileView'] = relationship(back_populates='viewer')
+    given_ratings: Mapped[list['Rating']] = relationship(back_populates='rater')
+    profile_views: Mapped[list['ProfileView']] = relationship(back_populates='viewer')
 
 class Profile(Base):
     __tablename__ = 'profiles'
@@ -27,8 +27,8 @@ class Profile(Base):
     created_at: Mapped[datetime] = mapped_column(default=datetime.now)
     delete_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now()+timedelta(days=7))
     user: Mapped['User'] = relationship(back_populates='profile')
-    received_ratings: Mapped['Rating'] = relationship(back_populates='profile')
-    viewed_by: Mapped['ProfileView'] = relationship(back_populates='profile')
+    received_ratings: Mapped[list['Rating']] = relationship(back_populates='profile')
+    viewed_by: Mapped[list['ProfileView']] = relationship(back_populates='profile')
 
 class Rating(Base):
     __tablename__ = 'ratings'
