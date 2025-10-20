@@ -44,6 +44,29 @@ import time
 logger = logging.getLogger(__name__)
 router = Router()
 
+def get_display_username(username: str | None) -> str:
+    """Безопасно получает username для отображения"""
+    if username:
+        return f"@{username}"
+    return "Пользователь без username"
+
+# Telegram ограничения: caption до ~1024 символов, текст до ~4096
+CAPTION_LIMIT = 1000
+TEXT_LIMIT = 4000
+
+def truncate_text(text: str, max_length: int) -> str:
+    if not text:
+        return ""
+    if len(text) <= max_length:
+        return text
+    return text[: max_length - 3] + "..."
+
+def build_profile_text_for_caption(lines: list[str], for_caption: bool = True) -> str:
+    # Склеиваем строки и обрезаем под лимит
+    text = "".join(lines)
+    limit = CAPTION_LIMIT if for_caption else TEXT_LIMIT
+    return truncate_text(text, limit)
+
 class ProfileStates(StatesGroup):
     waiting_for_description = State()
     waiting_for_category = State()
@@ -70,7 +93,7 @@ async def show_profile_for_moderation(message: Message, profile_id):
     
     profile_text = (
         f"📝 Анкета на модерацию:\n\n"
-        f"👤 Пользователь: @{profile.user.username}\n"
+        f"👤 Пользователь: {get_display_username(profile.user.username)}\n"
         f"📝 Описание: {profile.description}\n"
         f"✨ Категория: {profile.category}\n"
         f"📅 Создана: {profile.created_at.strftime('%d.%m.%Y %H:%M') if profile.created_at else 'неизвестно'}"
@@ -119,18 +142,17 @@ async def next_profile(callback: CallbackQuery, state: FSMContext):#moderation
     await callback.message.delete()
     await show_profile_for_moderation(callback.message, profile_id)
 
-async def show_next_profile(message: Message, state: FSMContext):#clients
-    if message.from_user.id == 1653541807:
-        is_admin=True
-    else:
-        is_admin=False
+async def show_next_profile(message: Message, state: FSMContext, user_id: int = None):#clients
+    # Определяем ID пользователя (переданный или из сообщения)
+    telegram_id = user_id if user_id is not None else message.from_user.id
+    is_admin = telegram_id == 1653541807
     
     # Отладочная информация
-    print(f"DEBUG: show_next_profile вызвана для пользователя {message.from_user.id}")
+    print(f"DEBUG: show_next_profile вызвана для пользователя {telegram_id}")
     
-    profile = await get_random_profile(message.from_user.id)
+    profile = await get_random_profile(telegram_id)
     if not profile:
-        print(f"DEBUG: get_random_profile вернул None для пользователя {message.from_user.id}")
+        print(f"DEBUG: get_random_profile вернул None для пользователя {telegram_id}")
         await message.answer(
             "😔 К сожалению, больше нет доступных анкет для оценки.\n"
             "Попробуйте позже!",
@@ -147,25 +169,35 @@ async def show_next_profile(message: Message, state: FSMContext):#clients
         await state.clear()
         return
 
-    print(f"DEBUG: Найдена анкета profile_id={profile.id}, user_id={profile.user_id}, username={profile.user.username}")
+    print(f"DEBUG: Найдена анкета profile_id={profile.id}, user_id={profile.user_id}, username={get_display_username(profile.user.username)}")
 
     await state.set_state(ProfileViewStates.view_profiles)
     await state.update_data(current_profile_id=profile.id)
     
     # Безопасно обрабатываем рейтинги
-    ratings = profile.received_ratings or []
+    ratings = profile.received_ratings
+    if not ratings:
+        ratings = []
+    elif not isinstance(ratings, list):
+        ratings = [ratings]
     avg_rating = round(sum(r.score for r in ratings) / len(ratings), 2) if ratings else 0
     
-    profile_text = (
-        f"👤 Анкета пользователя @{profile.user.username}\n\n"
-        f"📝 Описание: {profile.description}\n"
-        f"✨ Категория: {profile.category}\n"
-        f"⭐️ Средняя оценка: {avg_rating}\n"
+    profile_text = build_profile_text_for_caption([
+        f"👤 Анкета пользователя {get_display_username(profile.user.username)}\n\n",
+        f"📝 Описание: {profile.description}\n",
+        f"✨ Категория: {profile.category}\n",
+        f"⭐️ Средняя оценка: {avg_rating}\n",
         f"📊 Количество оценок: {len(ratings)}"
-    )
+    ], for_caption=True)
     if profile.video_id:
         await message.answer_video(
             video=profile.video_id,
+            caption=profile_text,
+            reply_markup=get_rating_keyboard()
+        )
+    elif profile.photo_id:
+        await message.answer_photo(
+            photo=profile.photo_id,
             caption=profile_text,
             reply_markup=get_rating_keyboard()
         )
@@ -184,8 +216,17 @@ async def start(message: Message):
     user = await get_user(message.from_user.id)
     if not user: # Новый пользователь без анкеты
         user = await create_user(message.from_user.id, message.from_user.username)
-    await message.answer("Добро пожаловать в бот анкет! 🎉\n"
-        "Вы можете создать свою анкету или оценивать анкеты других пользователей.", reply_markup=get_main_keyboard(is_admin=is_admin))
+    welcome = (
+        "🎉 Добро пожаловать! Этот бот — пространство взаимопомощи.\n\n"
+        "Здесь люди делятся советами и достижениями, вдохновляют и поддерживают друг друга.\n\n"
+        "Что вы можете сделать:\n"
+        "• 📝 Создать свою анкету (категория → описание → медиа)\n"
+        "• 👥 Оценивать анкеты других и помогать им стать лучше\n"
+        "• 👤 Посмотреть/редактировать свою анкету\n"
+    )
+    if is_admin:
+        welcome += "\nАдмин-доступ:\n• 👨‍💼 Модерация анкет\n• 🎉 Кто победитель?"
+    await message.answer(welcome, reply_markup=get_main_keyboard(is_admin=is_admin))
 
 @router.message(F.text == '📝 Создать анкету')
 async def create_profile_start(message: Message, state: FSMContext):
@@ -204,8 +245,15 @@ async def create_profile_start(message: Message, state: FSMContext):
             reply_markup=get_main_keyboard(is_admin=is_admin)
         )
     else:
-        await state.set_state(ProfileStates.waiting_for_description)
-        await message.answer("👀 Пожалуйста, напишите описание для вашей анкеты:")
+        await state.set_state(ProfileStates.waiting_for_category)
+        await message.answer(
+            "Выберите категорию вашего контента и отправьте её сообщением:\n"
+            "🎮 Игры\n"
+            "💻 Программирование\n"
+            "🍲 Кулинария\n"
+            "🖼 Искусство\n"
+            "💼 Бизнес"
+        )
 
 @router.message(ProfileStates.waiting_for_description)
 async def process_description(message: Message, state: FSMContext):
@@ -213,15 +261,8 @@ async def process_description(message: Message, state: FSMContext):
         await message.answer("⚠️ Пожалуйста, отправьте текстовое описание для вашей анкеты (не фото, не видео, не файл). Попробуйте ещё раз.")
         return
     await state.update_data(description=message.text)
-    await state.set_state(ProfileStates.waiting_for_category)
-    await message.answer(
-        "Теперь выберите категорию вашего контента и напишите её\n" 
-        "🎮 Игры\n"
-        "💻 Программирование\n"
-        "🍲 Кулинария\n"
-        "🖼 Искусство\n"
-        "💼 Бизнес\n"
-    )
+    await state.set_state(ProfileStates.waiting_for_video)
+    await message.answer("📷 Хорошо, теперь отправьте видео или фото для вашей анкеты (или напишите 'пропустить', если нет медиафайлов)")
 
 @router.message(ProfileStates.waiting_for_category)
 async def process_category(message: Message, state: FSMContext):
@@ -229,8 +270,8 @@ async def process_category(message: Message, state: FSMContext):
         await message.answer("⚠️ Пожалуйста, отправьте корректную категорию для вашей анкеты")
         return
     await state.update_data(category=message.text)
-    await state.set_state(ProfileStates.waiting_for_video)
-    await message.answer("📷 Хорошо, теперь отправьте видео или фото для вашей анкеты(или напишите 'пропустить', если нет медиафайлов)")
+    await state.set_state(ProfileStates.waiting_for_description)
+    await message.answer("✍️ Отлично! Теперь отправьте текстовое описание вашей анкеты")
 
 @router.message(ProfileStates.waiting_for_video, F.video)
 async def process_video(message: Message, state: FSMContext, bot: Bot):
@@ -301,7 +342,7 @@ async def process_video(message: Message, state: FSMContext, bot: Bot):
 
         admin_message = (
             f"📝 Новая анкета на модерацию:\n\n"
-            f"👤 Пользователь: @{message.from_user.username}\n"
+            f"👤 Пользователь: {get_display_username(message.from_user.username)}\n"
             f"📝 Описание: {data['description']}\n"
             f"✨ Категория: {profile.category}\n"
             f"📅 Создана: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
@@ -374,7 +415,7 @@ async def process_photo(message: Message, state: FSMContext, bot: Bot):
 
         admin_message = (
             f"📝 Новая анкета на модерацию:\n\n"
-            f"👤 Пользователь: @{message.from_user.username}\n"
+            f"👤 Пользователь: {get_display_username(message.from_user.username)}\n"
             f"📝 Описание: {data['description']}\n"
             f"✨ Категория: {profile.category}\n"
             f"📅 Создана: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
@@ -427,7 +468,7 @@ async def process_skip_media(message: Message, state: FSMContext, bot: Bot):
 
         admin_message = (
             f"📝 Новая анкета на модерацию:\n\n"
-            f"👤 Пользователь: @{message.from_user.username}\n"
+            f"👤 Пользователь: {get_display_username(message.from_user.username)}\n"
             f"📝 Описание: {data['description']}\n"
             f"✨ Категория: {profile.category}\n"
             f"📅 Создана: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
@@ -476,7 +517,7 @@ async def show_profile(message: Message):
     avg_rating = sum(r.score for r in ratings)/len(ratings) if ratings else 0
     status_text = "✅ Одобрена" if profile.is_verified else "⏳ На модерации"
     profile_text = (
-        f"👤 Ваша анкета: {profile.user.username}\n"
+        f"👤 Ваша анкета: {get_display_username(profile.user.username)}\n"
         f"📝 Описание: {profile.description}\n"
         f"✨ Категория: {profile.category}\n"
         f"⭐️ Средняя оценка: {round(avg_rating, 1)}\n"
@@ -578,7 +619,7 @@ async def process_edit_video(message: Message, state: FSMContext, bot: Bot):
     if profile:
         admin_message = (
             f"📝 Обновленная анкета на модерацию:\n\n"
-            f"👤 Пользователь: @{message.from_user.username}\n"
+            f"👤 Пользователь: {get_display_username(message.from_user.username)}\n"
             f"📝 Описание: {new_description}\n"
             f"📝 Категория: {new_category}\n"
         )
@@ -621,7 +662,7 @@ async def process_edit_photo(message: Message, state: FSMContext, bot: Bot):
     if profile:
         admin_message = (
             f"📝 Обновленная анкета на модерацию:\n\n"
-            f"👤 Пользователь: @{message.from_user.username}\n"
+            f"👤 Пользователь: {get_display_username(message.from_user.username)}\n"
             f"📝 Описание: {new_description}\n"
             f"📝 Категория: {new_category}\n"
         )
@@ -677,7 +718,7 @@ async def process_skip_media(message: Message, state: FSMContext, bot: Bot):
 
         admin_message = (
             f"📝 Новая анкета на модерацию:\n\n"
-            f"👤 Пользователь: @{message.from_user.username}\n"
+            f"👤 Пользователь: {get_display_username(message.from_user.username)}\n"
             f"📝 Описание: {data['description']}\n"
             f"✨ Категория: {profile.category}\n"
             f"📅 Создана: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
@@ -809,23 +850,36 @@ async def start_rating_profiles(message: Message, state: FSMContext):
     ratings = profile.received_ratings
     if not ratings:
         ratings = []
+    elif not isinstance(ratings, list):
+        ratings = [ratings]
     avg_rating = round(sum(r.score for r in ratings) / len(ratings), 1) if ratings else 0
     
-    profile_text = (
-        f"👤 Анкета пользователя @{profile.user.username}\n\n"
-        f"📝 Описание: {profile.description}\n"
-        f"⭐️ Средняя оценка: {avg_rating}\n"
+    profile_text = build_profile_text_for_caption([
+        f"👤 Анкета пользователя {get_display_username(profile.user.username)}\n\n",
+        f"📝 Описание: {profile.description}\n",
+        f"⭐️ Средняя оценка: {avg_rating}\n",
         f"📊 Количество оценок: {len(ratings)}"
-    )
+    ], for_caption=True)
     if profile.video_id:
-        await message.answer_video(video=profile.video_id, caption=profile_text, reply_markup=get_rating_keyboard())
+        await message.answer_video(
+            video=profile.video_id, 
+            caption=profile_text, 
+            reply_markup=get_rating_keyboard()
+        )
+    elif profile.photo_id:
+        await message.answer_photo(
+            photo=profile.photo_id, 
+            caption=profile_text, 
+            reply_markup=get_rating_keyboard()
+        )
     else:
         await message.answer(
-            profile_text, reply_markup=get_rating_keyboard()
+            profile_text, 
+            reply_markup=get_rating_keyboard()
         )
 
 @router.callback_query(F.data.startswith('score_'))
-async def process_rating_score(callback: CallbackQuery, state: FSMContext):
+async def process_rating_score(callback: CallbackQuery, state: FSMContext, bot: Bot):
     print(f"DEBUG: process_rating_score вызвана для пользователя {callback.from_user.id}")
     
     if not await state.get_state() == ProfileViewStates.view_profiles:
@@ -849,9 +903,79 @@ async def process_rating_score(callback: CallbackQuery, state: FSMContext):
         print(f"DEBUG: Оценка создана успешно, помечаем анкету просмотренной")
         await mark_profile_as_viewed(callback.from_user.id, profile_id)
         await callback.answer("✅ Спасибо за вашу оценку!")
+        
+        # Получаем информацию о следующей анкете перед удалением сообщения
+        user_telegram_id = callback.from_user.id
+        profile = await get_random_profile(user_telegram_id)
+        
         await callback.message.delete()
         print(f"DEBUG: Вызываем show_next_profile")
-        await show_next_profile(callback.message, state)
+        
+        if not profile:
+            print(f"DEBUG: get_random_profile вернул None для пользователя {user_telegram_id}")
+            is_admin = user_telegram_id == 1653541807
+            await bot.send_message(
+                chat_id=user_telegram_id,
+                text="😔 К сожалению, больше нет доступных анкет для оценки.\n"
+                     "Попробуйте позже!",
+                reply_markup=get_main_keyboard(is_admin=is_admin)
+            )
+            await state.clear()
+            return
+        
+        if not profile.user:
+            print(f"DEBUG: profile.user равен None для profile_id {profile.id}")
+            is_admin = user_telegram_id == 1653541807
+            await bot.send_message(
+                chat_id=user_telegram_id,
+                text="⚠️ Ошибка: не удалось загрузить данные пользователя.",
+                reply_markup=get_main_keyboard(is_admin=is_admin)
+            )
+            await state.clear()
+            return
+
+        # Показываем следующую анкету
+        await state.set_state(ProfileViewStates.view_profiles)
+        await state.update_data(current_profile_id=profile.id)
+        
+        # Безопасно обрабатываем рейтинги
+        ratings = profile.received_ratings
+        if not ratings:
+            ratings = []
+        elif not isinstance(ratings, list):
+            ratings = [ratings]
+        avg_rating = round(sum(r.score for r in ratings) / len(ratings), 2) if ratings else 0
+        
+        profile_text = build_profile_text_for_caption([
+            f"👤 Анкета пользователя {get_display_username(profile.user.username)}\n\n",
+            f"📝 Описание: {profile.description}\n",
+            f"✨ Категория: {profile.category}\n",
+            f"⭐️ Средняя оценка: {avg_rating}\n",
+            f"📊 Количество оценок: {len(ratings)}"
+        ], for_caption=True)
+        
+        is_admin = user_telegram_id == 1653541807
+        
+        if profile.video_id:
+            await bot.send_video(
+                chat_id=user_telegram_id,
+                video=profile.video_id,
+                caption=profile_text,
+                reply_markup=get_rating_keyboard()
+            )
+        elif profile.photo_id:
+            await bot.send_photo(
+                chat_id=user_telegram_id,
+                photo=profile.photo_id,
+                caption=profile_text,
+                reply_markup=get_rating_keyboard()
+            )
+        else:
+            await bot.send_message(
+                chat_id=user_telegram_id,
+                text=profile_text,
+                reply_markup=get_rating_keyboard()
+            )
     else:
         await callback.answer("⚠️ Ошибка при сохранении оценки", show_alert=True)
 
@@ -871,21 +995,31 @@ async def show_winner(message: Message):
     elif not isinstance(ratings, list):
         ratings = [ratings]
     avg_rating = sum(r.score for r in ratings) / len(ratings) if ratings else 0
-    
-    profile_text = (
-        f"🏆 Победитель!\n\n"
-        f"👤 Пользователь: @{winner.user.username}\n"
-        f"📝 Описание: {winner.description}\n"
-        f"✨ Категория: {winner.category}\n"
-        f"⭐️ Средняя оценка: {round(avg_rating, 2)}\n"
-        f"📊 Количество оценок: {len(ratings)}"
-    )
+
+    profile_text = build_profile_text_for_caption([
+        f"🏆 Победитель!\n\n",
+        f"👤 Пользователь: {get_display_username(winner.user.username)}\n",
+        f"⭐️ Средняя оценка: {round(avg_rating, 2)}\n",
+        f"📊 Количество оценок: {len(ratings)}\n",
+        f"✨ Категория: {winner.category}\n",
+        f"📝 Описание: {winner.description}"
+    ], for_caption=True)
     if winner.video_id:
         await message.answer_video(video=winner.video_id, caption=profile_text)
     elif winner.photo_id:
         await message.answer_photo(photo=winner.photo_id, caption=profile_text)
     else:
-        await message.answer(text=profile_text)
+        # Для текстового сообщения применим более высокий лимит
+        await message.answer(text=build_profile_text_for_caption([
+            f"🏆 Победитель!\n\n",
+            f"👤 Пользователь: {get_display_username(winner.user.username)}\n",
+            f"⭐️ Средняя оценка: {round(avg_rating, 2)}\n",
+            f"📊 Количество оценок: {len(ratings)}\n",
+            f"✨ Категория: {winner.category}\n",
+            f"📝 Описание: {winner.description}"
+        ], for_caption=False))
+
+   
 
 
 
