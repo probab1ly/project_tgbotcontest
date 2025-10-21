@@ -1,51 +1,79 @@
-from sqlalchemy import ForeignKey
-from sqlalchemy.orm import DeclarativeBase, relationship, Mapped, mapped_column
-from datetime import datetime, timedelta
+from aiogram.types import ReplyKeyboardMarkup, InlineKeyboardMarkup, KeyboardButton, InlineKeyboardButton
+def get_main_keyboard(is_admin: bool = False):
+    keyboard = [
+        [
+            KeyboardButton(text="📝 Создать анкету"),
+            KeyboardButton(text="👤 Моя анкета")
+        ],
+        [
+            KeyboardButton(text="👥 Оценить анкеты")        
+        ]
+    ]
 
-class Base(DeclarativeBase):
-    pass
+    if is_admin:
+        keyboard.append(
+        [
+            KeyboardButton(text="👨‍💼 Модерация анкет"),
+            KeyboardButton(text="🎉 Кто победитель?")
+        ]
+        )
 
-class User(Base):
-    __tablename__ = 'users'
-    id: Mapped[int] = mapped_column(primary_key=True)
-    telegram_id: Mapped[int] = mapped_column(unique=True)
-    username: Mapped[str | None] = mapped_column(nullable=True)  # Может быть None, если пользователь не установил username в Telegram
-    created_at: Mapped[datetime] = mapped_column(default=datetime.now)
-    profile: Mapped['Profile'] = relationship(back_populates='user', uselist=False)
-    given_ratings: Mapped[list['Rating']] = relationship(back_populates='rater')
-    profile_views: Mapped[list['ProfileView']] = relationship(back_populates='viewer')
+    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
-class Profile(Base):
-    __tablename__ = 'profiles'
-    id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey('users.id'))
-    description: Mapped[str]
-    category: Mapped[str]
-    photo_id: Mapped[str] = mapped_column(nullable=True)
-    video_id: Mapped[str] = mapped_column(nullable=True)
-    is_verified: Mapped[bool] = mapped_column(default=False)
-    created_at: Mapped[datetime] = mapped_column(default=datetime.now)
-    delete_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now()+timedelta(days=7))
-    user: Mapped['User'] = relationship(back_populates='profile')
-    received_ratings: Mapped[list['Rating']] = relationship(back_populates='profile')
-    viewed_by: Mapped[list['ProfileView']] = relationship(back_populates='profile')
+def get_moderation_keyboard():
+    keyboard = ReplyKeyboardMarkup(
+        keyboard = [
+            [
+                KeyboardButton(text="📋 Анкеты на модерации"),
+                KeyboardButton(text="🔙 Назад")
+            ]
+        ], resize_keyboard=True
+    )
+    return keyboard
 
-class Rating(Base):
-    __tablename__ = 'ratings'
-    id: Mapped[int] = mapped_column(primary_key=True)
-    rater_id: Mapped[int] = mapped_column(ForeignKey('users.id'))
-    profile_id: Mapped[int] = mapped_column(ForeignKey('profiles.id'))
-    score: Mapped[float]
-    comment: Mapped[str] = mapped_column(nullable=True)
-    created_at: Mapped[datetime] = mapped_column(default=datetime.now)
-    rater: Mapped['User'] = relationship(back_populates='given_ratings')
-    profile: Mapped['Profile'] = relationship(back_populates='received_ratings')
+def get_moderation_profile(profile_id: int):
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard = [
+            [
+                InlineKeyboardButton(text="✅ Одобрить", callback_data=f"verify_{profile_id}"),
+                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_{profile_id}")
+            ]
+        ]
+    )
+    return keyboard
 
-class ProfileView(Base):
-    __tablename__ = 'profile_views'
-    id: Mapped[int] = mapped_column(primary_key=True)
-    viewer_id: Mapped[int] = mapped_column(ForeignKey('users.id'))
-    profile_id: Mapped[int] = mapped_column(ForeignKey('profiles.id'))
-    viewed_at: Mapped[datetime] = mapped_column(default=datetime.now)
-    viewer: Mapped['User'] = relationship(back_populates='profile_views')
-    profile: Mapped['Profile'] = relationship(back_populates='viewed_by')
+def get_rating_keyboard():
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text='1⭐', callback_data='score_1'),
+                InlineKeyboardButton(text='2⭐', callback_data='score_2'),
+                InlineKeyboardButton(text='3⭐', callback_data='score_3'),
+                InlineKeyboardButton(text='4⭐', callback_data='score_4'),
+                InlineKeyboardButton(text='5⭐', callback_data='score_5'),
+            ]
+        ]
+    )
+    return keyboard
+
+def get_profile_edit():
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard = [
+            [
+                InlineKeyboardButton(text="✏️ Редактировать", callback_data="edit_profile")
+                # InlineKeyboardButton(text="🗑 Удалить", callback_data="delete_profile")
+            ]
+        ]
+    )
+    return keyboard
+
+def get_profile_verification_keyboard(profile_id: int):
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text='✅ Одобрить', callback_data=f'verify_{profile_id}'),
+                InlineKeyboardButton(text='❌ Отклонить', callback_data=f'reject_{profile_id}')
+            ]
+        ]
+    )
+    return keyboard
