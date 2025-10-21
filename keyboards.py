@@ -6,7 +6,7 @@ def get_main_keyboard(is_admin: bool = False):
             KeyboardButton(text="👤 Моя анкета")
         ],
         [
-            KeyboardButton(text="👥 Оценить анкеты"),
+            KeyboardButton(text="👥 Оценить анкеты")        
         ]
     ]
 
@@ -60,8 +60,8 @@ def get_profile_edit():
     keyboard = InlineKeyboardMarkup(
         inline_keyboard = [
             [
-                InlineKeyboardButton(text="✏️ Редактировать", callback_data="edit_profile"),
-                InlineKeyboardButton(text="🗑 Удалить", callback_data="delete_profile")
+                InlineKeyboardButton(text="✏️ Редактировать", callback_data="edit_profile")
+                # InlineKeyboardButton(text="🗑 Удалить", callback_data="delete_profile")
             ]
         ]
     )
