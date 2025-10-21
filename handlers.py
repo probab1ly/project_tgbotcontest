@@ -217,15 +217,10 @@ async def start(message: Message):
     if not user: # Новый пользователь без анкеты
         user = await create_user(message.from_user.id, message.from_user.username)
     welcome = (
-        "🎉 Добро пожаловать! Этот бот — пространство взаимопомощи.\n\n"
-        "Здесь люди делятся советами и достижениями, вдохновляют и поддерживают друг друга.\n\n"
-        "Что вы можете сделать:\n"
-        "• 📝 Создать свою анкету (категория → описание → медиа)\n"
-        "• 👥 Оценивать анкеты других и помогать им стать лучше\n"
-        "• 👤 Посмотреть/редактировать свою анкету\n"
+        "Добро пожаловать в бот анкет! 🎉\n"
+        "Вы можете создать свою анкету или оценивать анкеты других пользователей.\n"
+        "В анкетах мы можете дать советы пользователям по одной из предложенных тематик, а также самим найти советы по интересующим вас вопросам"
     )
-    if is_admin:
-        welcome += "\nАдмин-доступ:\n• 👨‍💼 Модерация анкет\n• 🎉 Кто победитель?"
     await message.answer(welcome, reply_markup=get_main_keyboard(is_admin=is_admin))
 
 @router.message(F.text == '📝 Создать анкету')
@@ -234,6 +229,7 @@ async def create_profile_start(message: Message, state: FSMContext):
         is_admin=True
     else:
         is_admin=False
+
     existing_profile = await get_user_profile(message.from_user.id)
     if existing_profile:
         await message.answer(
@@ -252,6 +248,7 @@ async def create_profile_start(message: Message, state: FSMContext):
             "💻 Программирование\n"
             "🍲 Кулинария\n"
             "🖼 Искусство\n"
+            "✨ Жизнь\n"
             "💼 Бизнес"
         )
 
@@ -266,7 +263,7 @@ async def process_description(message: Message, state: FSMContext):
 
 @router.message(ProfileStates.waiting_for_category)
 async def process_category(message: Message, state: FSMContext):
-    if not message.text or message.text.lower() not in ['игры', 'программирование', 'кулинария', 'искусство', 'бизнес']:
+    if not message.text or message.text.lower() not in ['игры', 'программирование', 'кулинария', 'искусство', 'бизнес', 'жизнь']:
         await message.answer("⚠️ Пожалуйста, отправьте корректную категорию для вашей анкеты")
         return
     await state.update_data(category=message.text)
@@ -543,9 +540,31 @@ async def edit_profile_state(callback: CallbackQuery, state: FSMContext):
     if not profile:
         await callback.answer("⚠️ Анкета не найдена", show_alert=True)
         return
-    await state.set_state(ProfileStates.waiting_for_edit_description)
+    await state.set_state(ProfileStates.waiting_for_edit_category)
     await state.update_data(profile_id=profile.id)
-    await callback.message.answer("📝 Введите новое описание для анкеты:")
+    await callback.message.answer(
+        "Выберите новую категорию для вашей анкеты:\n"
+        "🎮 Игры\n"
+        "💻 Программирование\n"
+        "🍲 Кулинария\n"
+        "🖼 Искусство\n"
+        "✨ Жизнь\n"
+        "💼 Бизнес"
+    )
+
+@router.message(ProfileStates.waiting_for_edit_category)
+async def process_edit_category(message: Message, state: FSMContext):
+    if not message.text or message.text.lower() not in ['игры', 'программирование', 'кулинария', 'искусство', 'бизнес', 'жизнь']:
+        await message.answer("⚠️ Пожалуйста, отправьте корректную категорию для вашей анкеты")
+        return
+    data = await state.get_data()
+    if not data or 'profile_id' not in data:
+        await message.answer("⚠️ Произошла ошибка. Пожалуйста, попробуйте снова.")
+        await state.clear()
+        return
+    await state.update_data(category=message.text)
+    await state.set_state(ProfileStates.waiting_for_edit_description)
+    await message.answer("✍️ Отлично! Теперь отправьте новое описание для вашей анкеты:")
 
 @router.message(ProfileStates.waiting_for_edit_description)
 async def process_edit_description(message: Message, state: FSMContext):
@@ -560,27 +579,6 @@ async def process_edit_description(message: Message, state: FSMContext):
         return
     
     await state.update_data(description=message.text)
-    await state.set_state(ProfileStates.waiting_for_edit_category)
-    await message.answer(
-        "Теперь выберите новую категорию вашего контента и напишите её\n" 
-        "🎮 Игры\n"
-        "💻 Программирование\n"
-        "🍲 Кулинария\n"
-        "🖼 Искусство\n"
-        "💼 Бизнес\n"
-    )
-
-@router.message(ProfileStates.waiting_for_edit_category)
-async def process_edit_category(message: Message, state: FSMContext):
-    if not message.text or message.text.lower() not in ['игры', 'программирование', 'кулинария', 'искусство', 'бизнес']:
-        await message.answer("⚠️ Пожалуйста, отправьте корректную категорию для вашей анкеты")
-        return
-    data = await state.get_data()
-    if not data or 'profile_id' not in data:
-        await message.answer("⚠️ Произошла ошибка. Пожалуйста, попробуйте снова.")
-        await state.clear()
-        return
-    await state.update_data(category=message.text)
     await state.set_state(ProfileStates.waiting_for_edit_video)
     await message.answer("📷 Хорошо, теперь отправьте новое видео или фото для анкеты(или напишите 'пропустить' для сохранения старого видео)")
 
@@ -730,14 +728,14 @@ async def process_skip_media(message: Message, state: FSMContext, bot: Bot):
             reply_markup=get_main_keyboard(is_admin=is_admin)
         )
 
-@router.callback_query(F.data == 'delete_profile')
-async def delete_profile_handler(callback: CallbackQuery):
-    profile = await get_user_profile_with_rating(callback.from_user.id)
-    if not profile:
-        await callback.answer("⚠️ Анкета не найдена", show_alert=True)
-        return
-    await delete_profile(profile.id)
-    await callback.message.answer('✅ Анкета успешно удалена')
+# @router.callback_query(F.data == 'delete_profile')
+# async def delete_profile_handler(callback: CallbackQuery):
+#     profile = await get_user_profile_with_rating(callback.from_user.id)
+#     if not profile:
+#         await callback.answer("⚠️ Анкета не найдена", show_alert=True)
+#         return
+#     await delete_profile(profile.id)
+#     await callback.message.answer('✅ Анкета успешно удалена')
 
 @router.message(F.text == '👨‍💼 Модерация анкет')
 async def moderation_menu(message: Message):
@@ -855,8 +853,9 @@ async def start_rating_profiles(message: Message, state: FSMContext):
     avg_rating = round(sum(r.score for r in ratings) / len(ratings), 1) if ratings else 0
     
     profile_text = build_profile_text_for_caption([
-        f"👤 Анкета пользователя {get_display_username(profile.user.username)}\n\n",
+        # f"👤 Анкета пользователя {get_display_username(profile.user.username)}\n\n",
         f"📝 Описание: {profile.description}\n",
+        f"✨ Категория: {profile.category}\n",
         f"⭐️ Средняя оценка: {avg_rating}\n",
         f"📊 Количество оценок: {len(ratings)}"
     ], for_caption=True)
@@ -908,8 +907,8 @@ async def process_rating_score(callback: CallbackQuery, state: FSMContext, bot: 
         user_telegram_id = callback.from_user.id
         profile = await get_random_profile(user_telegram_id)
         
-        await callback.message.delete()
-        print(f"DEBUG: Вызываем show_next_profile")
+        # await callback.message.delete()
+        print(f"DEBUG:f Вызываем show_next_profile")
         
         if not profile:
             print(f"DEBUG: get_random_profile вернул None для пользователя {user_telegram_id}")
@@ -947,7 +946,7 @@ async def process_rating_score(callback: CallbackQuery, state: FSMContext, bot: 
         avg_rating = round(sum(r.score for r in ratings) / len(ratings), 2) if ratings else 0
         
         profile_text = build_profile_text_for_caption([
-            f"👤 Анкета пользователя {get_display_username(profile.user.username)}\n\n",
+            # f"👤 Анкета пользователя {get_display_username(profile.user.username)}\n\n",
             f"📝 Описание: {profile.description}\n",
             f"✨ Категория: {profile.category}\n",
             f"⭐️ Средняя оценка: {avg_rating}\n",
@@ -1019,7 +1018,7 @@ async def show_winner(message: Message):
             f"📝 Описание: {winner.description}"
         ], for_caption=False))
 
-   
+
 
 
 
