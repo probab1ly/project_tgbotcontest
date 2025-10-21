@@ -241,6 +241,9 @@ async def delete_ex_profiles():
             await session.execute(
                 delete(Rating).where(Rating.profile_id == profile.id)
             )
+            await session.execute(
+                delete(ProfileView).where(ProfileView.profile_id == profile.id)
+            )
             await session.delete(profile)
         await session.commit()
         return ex_profiles
@@ -290,11 +293,22 @@ async def delete_profile(profile_id: int):
         if profile:
             # Принудительно загружаем связанные данные в рамках текущей сессии
             await session.refresh(profile, attribute_names=['user', 'received_ratings'])
+            
+            # Удаляем все связанные записи
             await session.execute(
                 delete(Rating).where(Rating.profile_id == profile_id)
             )
+            await session.execute(
+                delete(ProfileView).where(ProfileView.profile_id == profile_id)
+            )
+            # Также удаляем записи, где пользователь является просматривающим
+            await session.execute(
+                delete(ProfileView).where(ProfileView.viewer_id == profile.user_id)
+            )
+            
             await session.delete(profile)
-            await session.delete(profile.user)
+            # Не удаляем пользователя, чтобы избежать проблем с foreign key constraints
+            # await session.delete(profile.user)
             await session.commit()
             return True
         return False
