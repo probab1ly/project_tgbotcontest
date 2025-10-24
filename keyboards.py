@@ -77,3 +77,24 @@ def get_profile_verification_keyboard(profile_id: int):
         ]
     )
     return keyboard
+
+def get_category_selection_keyboard(categories: list):
+    """Создает клавиатуру для выбора категории анкет"""
+    keyboard = []
+    for i in range(0, len(categories), 2):  # По 2 кнопки в ряду
+        row = []
+        for j in range(2):
+            if i + j < len(categories):
+                category = categories[i + j]
+                row.append(InlineKeyboardButton(
+                    text=category, 
+                    callback_data=f"select_category_{category}"
+                ))
+        keyboard.append(row)
+    
+    # Добавляем кнопку "Сменить категорию" в конце
+    keyboard.append([
+        InlineKeyboardButton(text="🔄 Сменить категорию", callback_data="change_category")
+    ])
+    
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
