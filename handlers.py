@@ -8,7 +8,8 @@ import logging
 from datetime import datetime
 from keyboards import (
     get_main_keyboard, get_rating_keyboard, get_profile_verification_keyboard,
-    get_profile_edit, get_moderation_keyboard, get_moderation_profile
+    get_profile_edit, get_moderation_keyboard, get_moderation_profile,
+    get_category_selection_keyboard
 )
 from database import (
     get_user, create_user, create_profile, get_random_profile,
@@ -16,7 +17,8 @@ from database import (
     edit_profile, delete_profile, get_user_profile_with_rating,
     verify_profile, reject_profile, get_need_profiles, get_profile_for_moderation,
     verify_profile, reject_profile, mark_profile_as_viewed,
-    get_unviewed_profiles_count, get_winner_profile
+    get_unviewed_profiles_count, get_winner_profile,
+    get_random_profile_by_category, get_available_categories
 )
 from typing import Callable, Awaitable
 import time
@@ -78,6 +80,7 @@ class ProfileStates(StatesGroup):
 class RatingStates(StatesGroup):
     waiting_for_rating = State()
     waiting_for_comment = State()
+    waiting_for_category_selection = State()
 
 class ModerationStates(StatesGroup):
     view_profiles = State()
@@ -150,15 +153,20 @@ async def show_next_profile(message: Message, state: FSMContext, user_id: int = 
     # Отладочная информация
     print(f"DEBUG: show_next_profile вызвана для пользователя {telegram_id}")
     
-    profile = await get_random_profile(telegram_id)
+    # Получаем выбранную категорию из состояния
+    data = await state.get_data()
+    selected_category = data.get('selected_category', 'Все')
+    
+    profile = await get_random_profile_by_category(telegram_id, selected_category)
     if not profile:
         print(f"DEBUG: get_random_profile вернул None для пользователя {telegram_id}")
+        categories = await get_available_categories()
         await message.answer(
-            "😔 К сожалению, больше нет доступных анкет для оценки.\n"
-            "Попробуйте позже!",
-            reply_markup=get_main_keyboard(is_admin=is_admin)
+            f"😔 К сожалению, в категории '{selected_category}' больше нет доступных анкет для оценки.\n"
+            "Попробуйте выбрать другую категорию:",
+            reply_markup=get_category_selection_keyboard(categories)
         )
-        await state.clear()
+        await state.set_state(RatingStates.waiting_for_category_selection)
         return
     if not profile.user:
         print(f"DEBUG: profile.user равен None для profile_id {profile.id}")
@@ -827,21 +835,51 @@ async def start_rating_profiles(message: Message, state: FSMContext):
             reply_markup=get_main_keyboard(is_admin=is_admin)
         )
         return
-    available_count = await get_unviewed_profiles_count(message.from_user.id)
-    profile = await get_random_profile(message.from_user.id)
-    if not profile:
+    # Получаем доступные категории
+    categories = await get_available_categories()
+    if not categories or len(categories) <= 1:  # Только "Все" или пустой список
         await message.answer(
             "😔 К сожалению, сейчас нет доступных анкет для оценки.\nПопробуйте позже!",
             reply_markup=get_main_keyboard(is_admin=is_admin)
         )
         return
-    if not profile.user:
-        await message.answer(
-            "⚠️ Ошибка: не удалось загрузить данные пользователя.",
-            reply_markup=get_main_keyboard(is_admin=is_admin)
+    
+    # Показываем выбор категории
+    await state.set_state(RatingStates.waiting_for_category_selection)
+    await state.update_data(available_categories=categories)
+    
+    categories_text = "\n".join([f"• {cat}" for cat in categories])
+    await message.answer(
+        f"📋 Выберите категорию анкет для оценивания:\n\n{categories_text}\n\n"
+        "Нажмите на кнопку с нужной категорией:",
+        reply_markup=get_category_selection_keyboard(categories)
+    )
+
+@router.callback_query(F.data.startswith('select_category_'))
+async def process_category_selection(callback: CallbackQuery, state: FSMContext):
+    """Обработка выбора категории для оценивания"""
+    category = callback.data.replace('select_category_', '')
+    await state.update_data(selected_category=category)
+    await state.set_state(ProfileViewStates.view_profiles)
+    
+    # Получаем анкету выбранной категории
+    profile = await get_random_profile_by_category(callback.from_user.id, category)
+    
+    if not profile:
+        await callback.message.edit_text(
+            f"😔 К сожалению, в категории '{category}' нет доступных анкет для оценки.\n"
+            "Попробуйте выбрать другую категорию.",
+            reply_markup=get_category_selection_keyboard(await get_available_categories())
         )
         return
-    await state.set_state(ProfileViewStates.view_profiles)
+    
+    if not profile.user:
+        await callback.message.edit_text(
+            "⚠️ Ошибка: не удалось загрузить данные пользователя.",
+            reply_markup=get_category_selection_keyboard(await get_available_categories())
+        )
+        return
+    
     await state.update_data(current_profile_id=profile.id)
     
     # Безопасно обрабатываем рейтинги
@@ -853,29 +891,43 @@ async def start_rating_profiles(message: Message, state: FSMContext):
     avg_rating = round(sum(r.score for r in ratings) / len(ratings), 1) if ratings else 0
     
     profile_text = build_profile_text_for_caption([
-        # f"👤 Анкета пользователя {get_display_username(profile.user.username)}\n\n",
         f"📝 Описание: {profile.description}\n",
         f"✨ Категория: {profile.category}\n",
         f"⭐️ Средняя оценка: {avg_rating}\n",
         f"📊 Количество оценок: {len(ratings)}"
     ], for_caption=True)
+    
     if profile.video_id:
-        await message.answer_video(
+        await callback.message.edit_text("📹 Загружаю анкету...")
+        await callback.message.answer_video(
             video=profile.video_id, 
             caption=profile_text, 
             reply_markup=get_rating_keyboard()
         )
     elif profile.photo_id:
-        await message.answer_photo(
+        await callback.message.edit_text("📷 Загружаю анкету...")
+        await callback.message.answer_photo(
             photo=profile.photo_id, 
             caption=profile_text, 
             reply_markup=get_rating_keyboard()
         )
     else:
-        await message.answer(
+        await callback.message.edit_text(
             profile_text, 
             reply_markup=get_rating_keyboard()
         )
+
+@router.callback_query(F.data == 'change_category')
+async def process_change_category(callback: CallbackQuery, state: FSMContext):
+    """Обработка смены категории"""
+    categories = await get_available_categories()
+    categories_text = "\n".join([f"• {cat}" for cat in categories])
+    
+    await callback.message.edit_text(
+        f"📋 Выберите новую категорию анкет для оценивания:\n\n{categories_text}\n\n"
+        "Нажмите на кнопку с нужной категорией:",
+        reply_markup=get_category_selection_keyboard(categories)
+    )
 
 @router.callback_query(F.data.startswith('score_'))
 async def process_rating_score(callback: CallbackQuery, state: FSMContext, bot: Bot):
@@ -905,7 +957,9 @@ async def process_rating_score(callback: CallbackQuery, state: FSMContext, bot: 
         
         # Получаем информацию о следующей анкете перед удалением сообщения
         user_telegram_id = callback.from_user.id
-        profile = await get_random_profile(user_telegram_id)
+        data = await state.get_data()
+        selected_category = data.get('selected_category', 'Все')
+        profile = await get_random_profile_by_category(user_telegram_id, selected_category)
         
         # await callback.message.delete()
         print(f"DEBUG:f Вызываем show_next_profile")
@@ -913,13 +967,14 @@ async def process_rating_score(callback: CallbackQuery, state: FSMContext, bot: 
         if not profile:
             print(f"DEBUG: get_random_profile вернул None для пользователя {user_telegram_id}")
             is_admin = user_telegram_id == 1653541807
+            categories = await get_available_categories()
             await bot.send_message(
                 chat_id=user_telegram_id,
-                text="😔 К сожалению, больше нет доступных анкет для оценки.\n"
-                     "Попробуйте позже!",
-                reply_markup=get_main_keyboard(is_admin=is_admin)
+                text=f"😔 К сожалению, в категории '{selected_category}' больше нет доступных анкет для оценки.\n"
+                     "Попробуйте выбрать другую категорию:",
+                reply_markup=get_category_selection_keyboard(categories)
             )
-            await state.clear()
+            await state.set_state(RatingStates.waiting_for_category_selection)
             return
         
         if not profile.user:
