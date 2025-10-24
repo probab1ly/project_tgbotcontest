@@ -8,60 +8,46 @@ import logging
 import asyncio
 import os
 
+POSTGRES_USER = os.getenv('POSTGRES_USER', 'postgres')
+POSTGRES_PASSWORD = os.getenv('POSTGRES_PASSWORD', 'password')
+POSTGRES_HOST = os.getenv('POSTGRES_HOST', 'localhost')
+POSTGRES_PORT = os.getenv('POSTGRES_PORT', '5432')
+POSTGRES_DB = os.getenv('POSTGRES_DB', 'tgevaluation')
+
+# URL для подключения к PostgreSQL (или SQLite для тестирования)
+USE_POSTGRESQL = os.getenv('USE_POSTGRESQL', 'false').lower() == 'true'
+
+if USE_POSTGRESQL:
+    DATABASE_URL = f"postgresql+psycopg2://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
+else:
+    DATABASE_URL = "sqlite+aiosqlite:///bot.db"
+
 logger = logging.getLogger(__name__)
 
-# Создаем движок и session maker отдельно, чтобы избежать проблем с пересозданием
 engine = None
 async_session = None
 
 async def init_db():
-    """Инициализация базы данных с проверкой и исправлением схемы"""
+    """Инициализация базы данных PostgreSQL"""
     global engine, async_session
     
     try:
-        # Проверяем, есть ли проблема с существующей базой данных
-        db_needs_recreation = False
-        
-        if os.path.exists('bot.db'):
-            try:
-                # Создаем временное соединение для проверки схемы
-                temp_engine = create_async_engine('sqlite+aiosqlite:///bot.db', echo=False)
-                async with temp_engine.begin() as conn:
-                    result = await conn.execute(text("PRAGMA table_info(users)"))
-                    columns = result.fetchall()
-                    
-                    if columns:  # Если таблица существует
-                        username_column = next((col for col in columns if col[1] == 'username'), None)
-                        if username_column and username_column[3]:  # NOT NULL ограничение есть
-                            logger.info("Обнаружена проблема с NOT NULL ограничением в поле username.")
-                            logger.info("База данных будет пересоздана.")
-                            db_needs_recreation = True
-                await temp_engine.dispose()
-            except Exception as e:
-                logger.warning(f"Не удалось проверить схему базы данных: {e}")
-                db_needs_recreation = True
-        
-        # Если база данных проблемная, удаляем её
-        if db_needs_recreation and os.path.exists('bot.db'):
-            os.remove('bot.db')
-            logger.info("Старая база данных удалена")
-        
-        # Создаем или пересоздаем движок и session maker
-        engine = create_async_engine('sqlite+aiosqlite:///bot.db', echo=True)
+        # Создаем движок для PostgreSQL
+        engine = create_async_engine(DATABASE_URL, echo=True)
         async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
         
         # Создаем базу данных с правильной схемой
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-            logger.info("База данных инициализирована с правильной схемой")
+            logger.info("PostgreSQL база данных инициализирована с правильной схемой")
             
     except Exception as e:
-        logger.error(f"Ошибка при инициализации базы данных: {e}")
+        logger.error(f"Ошибка при инициализации PostgreSQL базы данных: {e}")
         raise
 
 # Инициализируем переменные, если они еще не созданы
 if engine is None:
-    engine = create_async_engine('sqlite+aiosqlite:///bot.db', echo=True)
+    engine = create_async_engine(DATABASE_URL, echo=True)
 if async_session is None:
     async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -88,7 +74,7 @@ async def get_user_profile(telegram_id: int):
             .where(User.telegram_id == telegram_id, Profile.is_verified == True)
             .order_by(Profile.created_at.desc())
         )
-        profile = result.scalar_one_or_none()
+        profile = result.scalars().first()
         if profile:
             return profile
         # Если одобренной нет — возвращаем последнюю любую анкету
@@ -98,6 +84,7 @@ async def get_user_profile(telegram_id: int):
             .join(User, Profile.user_id == User.id)
             .where(User.telegram_id == telegram_id)
             .order_by(Profile.created_at.desc())
+            .limit(1)
         )
         return result.scalar_one_or_none()
 
@@ -183,7 +170,7 @@ async def get_random_profile(ex_user_id: int):
         ).order_by(func.random()).limit(1)
         
         result = await session.execute(query)
-        profile = result.scalar_one_or_none()
+        profile = result.scalars().first()
         
         if profile:
             # Принудительно загружаем связанные данные в рамках текущей сессии
@@ -194,6 +181,61 @@ async def get_random_profile(ex_user_id: int):
             print(f"DEBUG: Причины: user_id={user.id}, просмотренные={viewed_profile_ids}")
         
         return profile
+
+async def get_random_profile_by_category(ex_user_id: int, category: str = None):
+    """Получить случайную анкету для оценивания по категории"""
+    async with async_session() as session:
+        # Сначала получаем внутренний ID пользователя по telegram_id
+        user_result = await session.execute(
+            select(User).where(User.telegram_id == ex_user_id)
+        )
+        user = user_result.scalar_one_or_none()
+        if not user:
+            return None
+        
+        conditions = [
+            Profile.is_verified == True,
+            Profile.user_id != user.id  # Используем внутренний ID пользователя
+        ]
+        
+        if category and category != "Все":
+            conditions.append(Profile.category == category)
+        
+        # Исключаем уже просмотренные анкеты
+        viewed_profiles = await session.execute(
+            select(ProfileView.profile_id).where(ProfileView.viewer_id == user.id)
+        )
+        viewed_profile_ids = [row[0] for row in viewed_profiles.fetchall()]
+        if viewed_profile_ids:
+            conditions.append(Profile.id.notin_(viewed_profile_ids))
+        
+        query = select(Profile).options(
+            selectinload(Profile.user), 
+            selectinload(Profile.received_ratings)
+        ).where(
+            and_(*conditions)
+        ).order_by(func.random()).limit(1)
+        
+        result = await session.execute(query)
+        profile = result.scalars().first()
+        
+        if profile:
+            # Принудительно загружаем связанные данные в рамках текущей сессии
+            await session.refresh(profile, attribute_names=['user', 'received_ratings'])
+            print(f"DEBUG: Возвращена анкета категории {category} для пользователя {ex_user_id}: profile_id={profile.id}, user_id={profile.user_id}")
+        else:
+            print(f"DEBUG: Нет доступных анкет категории {category} для пользователя {ex_user_id}")
+        
+        return profile
+
+async def get_available_categories():
+    """Получить список всех доступных категорий"""
+    async with async_session() as session:
+        result = await session.execute(
+            select(Profile.category).where(Profile.is_verified == True).distinct()
+        )
+        categories = [row[0] for row in result.fetchall()]
+        return ["Все"] + sorted(categories)
 
 async def mark_profile_as_viewed(viewer_telegram_id: int, profile_id: int):
     async with async_session() as session:
@@ -253,7 +295,7 @@ async def get_profile_info(profile_id: int):
         result = await session.execute(
             select(Profile).where(Profile.id == profile_id)
         )
-        profile = result.scalar_one_or_none()
+        profile = result.scalars().first()
         if profile and profile.delete_at:
             days = (profile.delete_at - datetime.utcnow()).days
             return profile.delete_at, days
@@ -264,21 +306,27 @@ async def edit_profile(profile_id: int, description: str, category: str, video_i
         result = await session.execute(
             select(Profile).where(Profile.id == profile_id)
         )
-        old_profile = result.scalar_one_or_none()
-        if old_profile:
-            # Создаём новую анкету с новыми данными, is_verified=False
-            new_profile = Profile(
-                user_id=old_profile.user_id,
-                description=description or old_profile.description,
-                category=category or old_profile.category,
-                video_id=video_id,
-                photo_id=photo_id,
-                is_verified=False
+        profile = result.scalar_one_or_none()
+        if profile:
+            # Удаляем все старые оценки и просмотры
+            await session.execute(
+                delete(Rating).where(Rating.profile_id == profile_id)
             )
-            session.add(new_profile)
+            await session.execute(
+                delete(ProfileView).where(ProfileView.profile_id == profile_id)
+            )
+            
+            # Обновляем существующую анкету
+            profile.description = description or profile.description
+            profile.category = category or profile.category
+            profile.video_id = video_id
+            profile.photo_id = photo_id
+            profile.is_verified = False  # Сбрасываем статус верификации
+            profile.created_at = datetime.now()  # Обновляем время создания
+            
             await session.commit()
-            await session.refresh(new_profile)
-            return new_profile
+            await session.refresh(profile)
+            return profile
         return None
     
 async def delete_profile(profile_id: int):
@@ -289,7 +337,7 @@ async def delete_profile(profile_id: int):
                 selectinload(Profile.received_ratings)
             ).where(Profile.id == profile_id)
         )
-        profile = result.scalar_one_or_none()
+        profile = result.scalars().first()
         if profile:
             # Принудительно загружаем связанные данные в рамках текущей сессии
             await session.refresh(profile, attribute_names=['user', 'received_ratings'])
@@ -306,6 +354,11 @@ async def delete_profile(profile_id: int):
                 delete(ProfileView).where(ProfileView.viewer_id == profile.user_id)
             )
             
+            # Удаляем все оценки, которые пользователь поставил другим анкетам
+            await session.execute(
+                delete(Rating).where(Rating.rater_id == profile.user_id)
+            )
+            
             await session.delete(profile)
             # Не удаляем пользователя, чтобы избежать проблем с foreign key constraints
             # await session.delete(profile.user)
@@ -317,7 +370,7 @@ async def get_user_profile_with_rating(telegram_id: int):
     async with async_session() as session:
         user_result = await session.execute(
             select(User).options(
-                selectinload(User.profile).selectinload(Profile.received_ratings)
+                selectinload(User.profiles).selectinload(Profile.received_ratings)
             ).where(User.telegram_id == telegram_id)
         )
         user = user_result.scalar_one_or_none()
@@ -325,11 +378,14 @@ async def get_user_profile_with_rating(telegram_id: int):
             logger.info(f"Пользователь не найден: telegram_id={telegram_id}")
             return None
         
-        if user.profile:
+        if user.profiles:
+            # Возвращаем последний профиль (самый новый)
+            latest_profile = max(user.profiles, key=lambda p: p.created_at)
             # Принудительно загружаем связанные данные в рамках текущей сессии
-            await session.refresh(user.profile, attribute_names=['received_ratings'])
+            await session.refresh(latest_profile, attribute_names=['received_ratings'])
+            return latest_profile
         
-        return user.profile
+        return None
 
 async def verify_profile(profile_id: int):
     async with async_session() as session:
@@ -339,7 +395,7 @@ async def verify_profile(profile_id: int):
                 selectinload(Profile.received_ratings)
             ).where(Profile.id == profile_id)
         )
-        profile = result.scalar_one_or_none()
+        profile = result.scalars().first()
         if profile:
             # Принудительно загружаем связанные данные в рамках текущей сессии
             await session.refresh(profile, attribute_names=['user', 'received_ratings'])
@@ -355,7 +411,7 @@ async def reject_profile(profile_id: int):
         result = await session.execute(
             select(Profile).where(Profile.id == profile_id)
         )
-        profile = result.scalar_one_or_none()
+        profile = result.scalars().first()
         if profile and not profile.is_verified:
             await session.delete(profile)
             await session.commit()
@@ -384,7 +440,7 @@ async def get_profile_for_moderation(profile_id: int):
                 selectinload(Profile.received_ratings)
             ).where(Profile.id == profile_id)
         )
-        profile = result.scalar_one_or_none()
+        profile = result.scalars().first()
         if profile:
             # Принудительно загружаем связанные данные в рамках текущей сессии
             await session.refresh(profile, attribute_names=['user', 'received_ratings'])
