@@ -11,7 +11,7 @@ class User(Base):
     telegram_id: Mapped[int] = mapped_column(unique=True)
     username: Mapped[str | None] = mapped_column(nullable=True)  # Может быть None, если пользователь не установил username в Telegram
     created_at: Mapped[datetime] = mapped_column(default=datetime.now)
-    profile: Mapped['Profile'] = relationship(back_populates='user', uselist=False)
+    profiles: Mapped[list['Profile']] = relationship(back_populates='user')
     given_ratings: Mapped[list['Rating']] = relationship(back_populates='rater')
     profile_views: Mapped[list['ProfileView']] = relationship(back_populates='viewer')
 
@@ -26,7 +26,7 @@ class Profile(Base):
     is_verified: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(default=datetime.now)
     delete_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now()+timedelta(days=7))
-    user: Mapped['User'] = relationship(back_populates='profile')
+    user: Mapped['User'] = relationship(back_populates='profiles')
     received_ratings: Mapped[list['Rating']] = relationship(back_populates='profile')
     viewed_by: Mapped[list['ProfileView']] = relationship(back_populates='profile')
 
